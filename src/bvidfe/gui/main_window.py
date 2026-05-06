@@ -218,6 +218,14 @@ class BvidMainWindow(QMainWindow):
         mode = self.input_mode_panel.current_mode()
         impact = self.impact_panel.get_impact_event() if mode == "impact" else None
         damage = self.damage_panel.get_damage_state() if mode == "damage" else None
+        if mode == "damage":
+            skipped = getattr(self.damage_panel, "skipped_rows", [])
+            if skipped:
+                rows = ", ".join(str(r) for r, _ in skipped)
+                self.statusBar().showMessage(
+                    f"Damage panel: skipped {len(skipped)} malformed row(s): {rows}",
+                    8000,
+                )
         mesh_params = None
         if self.analysis_panel.get_tier() == "fe3d":
             mesh_params = MeshParams(
@@ -650,11 +658,38 @@ class BvidMainWindow(QMainWindow):
         path_str, _ = QFileDialog.getOpenFileName(self, "Load AnalysisConfig", "", "JSON (*.json)")
         if not path_str:
             return
+        # Read + parse + apply in three explicit steps so each failure mode
+        # surfaces a specific message instead of the bare "list index out of
+        # range" string the previous catch-all displayed.
         try:
-            d = json.loads(Path(path_str).read_text())
+            text = Path(path_str).read_text()
+        except OSError as exc:
+            QMessageBox.warning(self, "Cannot read config", f"{path_str}: {exc}")
+            return
+        try:
+            d = json.loads(text)
+        except json.JSONDecodeError as exc:
+            QMessageBox.warning(
+                self,
+                "Malformed JSON",
+                f"{path_str} is not valid JSON: {exc.msg} (line {exc.lineno}, col {exc.colno}).",
+            )
+            return
+        try:
             cfg = config_from_dict(d)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Failed to load", str(exc))
+        except KeyError as exc:
+            QMessageBox.warning(
+                self,
+                "Missing field",
+                f"Config is missing required field: {exc}.",
+            )
+            return
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Invalid value",
+                f"Config has an invalid value: {exc}.",
+            )
             return
         self._apply_config_to_panels(cfg)
         self.statusBar().showMessage(f"Loaded config from {path_str}", 5000)

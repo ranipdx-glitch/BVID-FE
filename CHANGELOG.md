@@ -8,6 +8,28 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **GUI surfaces malformed input instead of silently dropping it.** Two
+  separate paths previously absorbed user-input failures with no
+  feedback: ``BvidMainWindow._load_config`` had a bare ``except
+  Exception`` around ``json.loads`` + ``config_from_dict`` that turned
+  every failure into a single cryptic ``str(exc)`` warning, and
+  ``DamagePanel.get_damage_state`` swallowed ``ValueError`` /
+  ``AttributeError`` per-row with ``continue`` so a typo in a single
+  cell silently dropped that delamination from the analysis. Both are
+  now explicit:
+  - ``_load_config`` distinguishes ``OSError`` (cannot read file),
+    ``json.JSONDecodeError`` (malformed JSON, with line + column),
+    ``KeyError`` (missing required field), and ``TypeError`` /
+    ``ValueError`` (wrong type), each with a distinct dialog title.
+  - ``DamagePanel.get_damage_state`` records every skipped row in a new
+    ``self.skipped_rows`` attribute and logs a warning on the
+    ``bvidfe.gui`` logger; ``BvidMainWindow._build_config`` reads this
+    after every config build and reports skipped row indices via the
+    status bar so the user can fix the typo. Four new tests in
+    ``tests/gui/test_config_io.py`` (covering JSON parse errors, missing
+    fields, wrong types, and damage-row skipping) lock the new
+    behaviour.
+
 - **GUI tier-comparison no longer freezes the main thread.** The
   "Compare Tiers (empirical + semi_analytical)..." menu action ran 16
   `BvidAnalysis.run()` calls (2 tiers x 8 energies, ~12 s wall clock at

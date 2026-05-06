@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
@@ -20,6 +21,8 @@ from PyQt6.QtWidgets import (
 
 from bvidfe.damage.io import CScanSchemaError, load_cscan_json
 from bvidfe.damage.state import DamageState, DelaminationEllipse
+
+_log = logging.getLogger("bvidfe.gui")
 
 
 class DamagePanel(QWidget):
@@ -117,8 +120,17 @@ class DamagePanel(QWidget):
         self.fb_spin.setValue(ds.fiber_break_radius_mm)
 
     def get_damage_state(self) -> DamageState:
-        """Read the table and spinboxes into a DamageState."""
+        """Read the table and spinboxes into a DamageState.
+
+        Skipped rows are reported via ``self.skipped_rows`` (zero-indexed
+        row numbers) and as a ``bvidfe.gui`` log warning, so a typo or
+        partially-edited cell can no longer silently drop a delamination
+        from the analysis. The main window inspects ``skipped_rows`` after
+        the call to surface a status-bar message; programmatic callers can
+        do the same.
+        """
         dels: list[DelaminationEllipse] = []
+        skipped: list[tuple[int, str]] = []
         for row in range(self.table.rowCount()):
             try:
                 iface = int(float(self.table.item(row, 0).text()))
@@ -128,8 +140,14 @@ class DamagePanel(QWidget):
                 minor = float(self.table.item(row, 4).text())
                 angle = float(self.table.item(row, 5).text())
                 dels.append(DelaminationEllipse(iface, (cx, cy), major, minor, angle))
-            except (ValueError, AttributeError):
-                continue
+            except (ValueError, AttributeError) as exc:
+                skipped.append((row, str(exc)))
+                _log.warning(
+                    "DamagePanel: skipping malformed delamination row %d (%s)",
+                    row,
+                    exc,
+                )
+        self.skipped_rows: list[tuple[int, str]] = skipped
         return DamageState(
             delaminations=dels,
             dent_depth_mm=float(self.dent_spin.value()),
