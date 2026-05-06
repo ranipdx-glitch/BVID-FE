@@ -78,8 +78,22 @@ def _guard_problem_size(cfg: AnalysisConfig) -> None:
         )
 
 
+# Voigt indices: [xx, yy, zz, yz, xz, xy] = [0, 1, 2, 3, 4, 5]
+# In-plane components live on rows/cols {0, 1, 5}; out-of-plane on {2, 3, 4}.
+# After rotation about z (Hex8Element.ply_angle_deg) these blocks remain
+# decoupled in C_global, so the mask below applies cleanly in the global
+# frame. See fe_mesh.DAMAGE_OOP_FACTOR / DAMAGE_FIBER_BREAK_INPLANE_FACTOR
+# docstrings for the physical model.
+_INPLANE_VOIGT = np.array([0, 1, 5])
+
+
 def _build_elements(mesh: FeMesh, lam: Laminate) -> List[Hex8Element]:
-    """Build a Hex8Element for each mesh element, with damage-aware stiffness scaling."""
+    """Build a Hex8Element for each mesh element with component-wise damage scaling.
+
+    Two factors are applied to the 6x6 elasticity matrix:
+      - `mesh.damage_factors[e]` scales OOP and in-plane/OOP cross terms
+      - `mesh.in_plane_damage_factors[e]` scales the in-plane sub-block
+    """
     elements: List[Hex8Element] = []
     for eidx in range(mesh.n_elements):
         node_ids = mesh.element_connectivity[eidx]
@@ -87,9 +101,14 @@ def _build_elements(mesh: FeMesh, lam: Laminate) -> List[Hex8Element]:
         mat = lam.material
         ply_angle = float(mesh.ply_angles_deg[eidx])
         elem = Hex8Element(node_coords, mat, ply_angle_deg=ply_angle)
-        # Scale the pre-computed global stiffness by damage factor
-        factor = float(mesh.damage_factors[eidx])
-        elem._C_global = elem._C_global * factor
+        f_oop = float(mesh.damage_factors[eidx])
+        f_ip = float(mesh.in_plane_damage_factors[eidx])
+        # Build a 6x6 element-wise scaling mask: start from f_oop everywhere
+        # (OOP block + Poisson cross-coupling), then overwrite the 3x3
+        # in-plane sub-block on rows/cols {0, 1, 5} with f_ip.
+        mask = np.full((6, 6), f_oop)
+        mask[np.ix_(_INPLANE_VOIGT, _INPLANE_VOIGT)] = f_ip
+        elem._C_global = elem._C_global * mask
         elements.append(elem)
     return elements
 
@@ -250,7 +269,9 @@ def fe3d_cai_buckling(
 
     Uses the "constant pre-stress" approximation (Cook §17.7 / Bathe §6.8):
     - sigma_0 = sigma_ref_MPa along x everywhere (unit reference compression).
-    - Damaged elements carry damage_factor * sigma_0 (reduced stress-carrying capacity).
+    - Damaged elements carry in_plane_damage_factor * sigma_0 (reduced load
+      fraction in fiber-break-core elements; pure-delamination elements carry
+      the full uniaxial load because the plies remain intact).
     - K_g is assembled element-by-element from Hex8Element.geometric_stiffness_matrix().
     - A minimal penalty-BC set suppresses rigid-body modes before the eigensolve.
 
@@ -283,7 +304,10 @@ def fe3d_cai_buckling(
     _t("K assembled", t0)
 
     # Assemble geometric stiffness K_g under uniform uniaxial pre-stress sigma_ref along x.
-    # Damaged elements carry damage_factor * sigma_ref (reduced load fraction).
+    # The pre-stress is sigma_xx (Voigt index 0, an in-plane component), so the
+    # damaged-element load fraction is the IN-PLANE damage factor — pure
+    # delamination zones still carry full uniaxial load (in_plane_factor ≈ 1.0)
+    # because the plies remain intact; only fiber-break-core elements carry less.
     sigma_bar_ref = np.zeros((3, 3))
     sigma_bar_ref[0, 0] = sigma_ref_MPa
 
@@ -292,7 +316,7 @@ def fe3d_cai_buckling(
     cols_chunks: list[np.ndarray] = []
     data_chunks: list[np.ndarray] = []
     for eidx, elem in enumerate(elements):
-        damage_f = float(mesh.damage_factors[eidx])
+        damage_f = float(mesh.in_plane_damage_factors[eidx])
         sigma_elem = sigma_bar_ref * damage_f
         Kg_e = elem.geometric_stiffness_matrix(sigma_elem)
         dof_arr = np.asarray(mesh.element_dof_maps[eidx], dtype=np.int64)

@@ -6,6 +6,40 @@ All notable changes to BVID-FE are documented in this file.
 
 In-progress work toward v0.2.0. No tag yet.
 
+### Fixed
+
+- **fe3d damage factor now applied component-wise to the elasticity matrix.**
+  The previous `DAMAGE_STIFFNESS_FACTOR = 0.30` was scaled into every entry of
+  the 6×6 `_C_global` matrix in `analysis/fe_tier._build_elements`, uniformly
+  reducing in-plane stiffness (E11, E22, G12) by 70% in delaminated zones —
+  even though the docstring in `fe_mesh.py` already noted that "the plies
+  themselves are intact (so in-plane load-carrying is mostly preserved)". The
+  fix replaces the single constant with two physically-motivated factors:
+  - `DAMAGE_OOP_FACTOR = 0.05` — out-of-plane (E33, G13, G23, and the
+    in-plane / OOP Poisson cross-coupling), applied to every element inside a
+    delamination ellipse footprint. Representative of the post-delamination
+    interlaminar-modulus loss reported in Bolotin (2001) and Sun & Tao (1998).
+  - `DAMAGE_FIBER_BREAK_INPLANE_FACTOR = 0.30` — in-plane sub-block (rows/cols
+    {0, 1, 5} in the global Voigt frame), applied only inside the fiber-break
+    core (within `fiber_break_radius_mm` of any delamination centroid).
+    Representative of fiber-direction damage saturation in Camanho & Davila
+    (2007) / Maimi et al. (2007) for CFRP.
+
+  `FeMesh` gains a new `in_plane_damage_factors` array; existing
+  `damage_factors` is now the OOP factor exclusively. The viz layer
+  (stress-field heatmap, pyvista damage overlay) is unchanged because it
+  visualises the OOP factor as "delamination depth", which is the right
+  semantic. The fe3d Kg assembly now scales the uniaxial sigma_xx prestress
+  by the in-plane factor (since the prestress is an in-plane component); pure
+  delamination zones therefore carry full uniaxial load through the fibers.
+
+  Effect on results: knockdown values shift, the buckling solve becomes more
+  responsive to damage size (because the pure-delamination in-plane block is
+  no longer over-penalised), and the previously-flagged "fe3d knockdown
+  approximately flat vs. impact energy" caveat is partially attenuated.
+  Existing tests are structural (inequalities and bounds, not pinned numeric
+  values) and should still pass; CI will flag any that need updating.
+
 ### Added
 
 - **Input-variable sensitivity rollup.** Before this change, four of the

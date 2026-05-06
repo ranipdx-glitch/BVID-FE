@@ -95,12 +95,14 @@ def _build_limitation_notes(results: AnalysisResults) -> list[str]:
                     f"is already applied via the mass_kg input."
                 )
 
-    # 4. fe3d tier notice: the tier is now monotonic-ish in energy thanks to
-    #    a more physical DAMAGE_STIFFNESS_FACTOR = 0.3 (was 1e-4), but the
-    #    absolute values are still conservative compared to empirical at
-    #    small DPA because the buckling path uses a uniform pre-stress
-    #    approximation with minimal lateral BCs. Point users at empirical
-    #    for screening / sweeps; fe3d for stress-field context.
+    # 4. fe3d tier notice: the tier uses a component-wise stiffness-reduction
+    #    model (DAMAGE_OOP_FACTOR ≈ 0.05 for delamination, plus an additional
+    #    DAMAGE_FIBER_BREAK_INPLANE_FACTOR ≈ 0.30 inside the fiber-break core).
+    #    Buckling now scales with damage size, but the absolute values can
+    #    still be conservative compared to empirical at small DPA because the
+    #    buckling path uses a uniform pre-stress approximation with minimal
+    #    lateral BCs. Point users at empirical for screening / sweeps; fe3d
+    #    for stress-field context.
     if results.tier_used == "fe3d" and results.knockdown > 0:
         notes.append(
             "ℹ fe3d tier: intended for stress-field context at a single "

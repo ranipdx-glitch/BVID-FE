@@ -45,6 +45,7 @@ def test_mesh_damage_factor_defaults_to_one_for_pristine():
     cfg = _simple_config()
     mesh = build_fe_mesh(cfg, DamageState([], dent_depth_mm=0.0))
     assert np.all(mesh.damage_factors == 1.0)
+    assert np.all(mesh.in_plane_damage_factors == 1.0)
 
 
 def test_mesh_damage_factor_reduced_inside_ellipse():
@@ -58,6 +59,48 @@ def test_mesh_damage_factor_reduced_inside_ellipse():
     # Some elements should have reduced stiffness
     n_damaged = (mesh.damage_factors < 1.0).sum()
     assert n_damaged > 0
+
+
+def test_mesh_delamination_only_preserves_in_plane_factor():
+    """Pure delamination (no fiber-break radius) reduces only the OOP factor."""
+    from bvidfe.analysis.fe_mesh import DAMAGE_OOP_FACTOR
+
+    cfg = _simple_config()
+    ds = DamageState(
+        [DelaminationEllipse(1, (10, 5), 8, 4, 0)],
+        dent_depth_mm=0.3,
+        fiber_break_radius_mm=0.0,
+    )
+    mesh = build_fe_mesh(cfg, ds)
+    damaged = mesh.damage_factors < 1.0
+    assert damaged.any(), "expected at least one damaged element"
+    assert np.allclose(mesh.damage_factors[damaged], DAMAGE_OOP_FACTOR)
+    # In-plane factor must stay at 1.0 in delamination-only zones
+    assert np.all(mesh.in_plane_damage_factors == 1.0)
+
+
+def test_mesh_fiber_break_core_reduces_in_plane_factor():
+    """Inside the fiber-break radius, both factors are reduced."""
+    from bvidfe.analysis.fe_mesh import (
+        DAMAGE_FIBER_BREAK_INPLANE_FACTOR,
+        DAMAGE_OOP_FACTOR,
+    )
+
+    cfg = _simple_config()
+    ds = DamageState(
+        [DelaminationEllipse(1, (10, 5), 8, 4, 0)],
+        dent_depth_mm=0.3,
+        fiber_break_radius_mm=3.0,  # carve out a fiber-break core at the centroid
+    )
+    mesh = build_fe_mesh(cfg, ds)
+    fiber_break = mesh.in_plane_damage_factors < 1.0
+    assert fiber_break.any(), "expected at least one fiber-break-core element"
+    assert np.allclose(
+        mesh.in_plane_damage_factors[fiber_break],
+        DAMAGE_FIBER_BREAK_INPLANE_FACTOR,
+    )
+    # Fiber-break-core elements must also have OOP reduced
+    assert np.all(mesh.damage_factors[fiber_break] == DAMAGE_OOP_FACTOR)
 
 
 def test_mesh_element_dof_maps_cover_24_dofs_each():

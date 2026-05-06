@@ -134,7 +134,7 @@ The damaged sublaminate above the largest delamination is treated as a plate wit
 
 ### 3D FE tier
 
-A structured hexahedral mesh is built for the damaged laminate. Delaminated interfaces are approximated by reducing interlaminar shear stiffness (stiffness-reduction model; true cohesive surfaces deferred to v0.2.0). First-ply-failure is evaluated at all Gauss points using LaRC05 (CAI) and Tsai-Wu (TAI). The buckling-eigenvalue-based CAI prediction is deferred to v0.2.0; v0.1.0 uses first-ply-failure on the damaged mesh as a conservative estimate.
+A structured hexahedral mesh is built for the damaged laminate. Delaminated interfaces are approximated by a **component-wise stiffness-reduction model** (true cohesive surfaces deferred to a future release): each damaged element carries an out-of-plane factor (`DAMAGE_OOP_FACTOR ≈ 0.05`) that scales the through-thickness and transverse-shear stiffness, while in-plane stiffness is preserved (the plies themselves remain intact). Inside the fiber-break core under the impact site, in-plane stiffness is also reduced (`DAMAGE_FIBER_BREAK_INPLANE_FACTOR ≈ 0.30`) to represent fiber bundle fracture. First-ply-failure is evaluated at all Gauss points using LaRC05 (CAI) and Tsai-Wu (TAI). For CAI, a true linear buckling eigensolve runs alongside FPF and the lower of the two governs.
 
 ### Knockdown definition and cross-tier comparability
 
@@ -172,11 +172,11 @@ knockdown = residual_strength_MPa / pristine_strength_MPa
 
 The "Damage Severity" tab in the GUI is **not** a simple count of damaged interfaces, nor is it a continuous physical damage variable (e.g. a Kachanov-style scalar). It is a through-thickness accumulation of the per-element stiffness-reduction metric used by the `fe3d` mesh:
 
-1. Each hex element in the damaged mesh carries a `damage_factor`: `1.0` if pristine, or `DAMAGE_STIFFNESS_FACTOR = 0.3` if it is intersected by a delamination interface inside an ellipse footprint, or sits inside the fiber-break core. The factor is **binary per element** (geometric overlap test in `bvidfe.analysis.fe_mesh.build_fe_mesh`), not a continuum damage variable.
-2. The per-element damage metric is `1 − damage_factor` (so `0.0` for pristine, `0.7` for damaged).
+1. Each hex element in the damaged mesh carries an **out-of-plane** stiffness factor `damage_factor`: `1.0` if pristine, or `DAMAGE_OOP_FACTOR ≈ 0.05` if it is intersected by a delamination interface inside an ellipse footprint, or sits inside the fiber-break core. (Fiber-break-core elements additionally carry a reduced **in-plane** factor `in_plane_damage_factor = DAMAGE_FIBER_BREAK_INPLANE_FACTOR ≈ 0.30`; pure-delamination elements leave the in-plane factor at `1.0`.) The factors are **categorical per element** (geometric overlap tests in `bvidfe.analysis.fe_mesh.build_fe_mesh`), not a continuum damage variable.
+2. The heatmap metric is `1 − damage_factor` (the OOP factor) — `0.0` for pristine, `0.95` for fully delaminated.
 3. For each in-plane column `(x, y)` the metric is **summed over the through-thickness elements** to produce the heatmap value (`bvidfe/gui/tabs/stress_field_tab.py`).
 
-The colorbar is therefore in units of "stacked damaged-element contributions": `0` means no delamination at any interface in that column, and the maximum (`≈ n_plies − 1` for a single fully-delaminated interface; higher if multiple interfaces are delaminated and `elements_per_ply > 1`) means every element through the thickness sits inside a damaged region. It is a visualization aid analogous to a C-scan operator's depth-projected damage map, not a quantitative continuum-damage field.
+The colorbar is therefore in units of "stacked OOP-stiffness loss contributions": `0` means no delamination at any interface in that column, and the maximum (`≈ n_plies − 1` for a single fully-delaminated interface; higher if multiple interfaces are delaminated and `elements_per_ply > 1`) means every element through the thickness sits inside a damaged region. It is a visualization aid analogous to a C-scan operator's depth-projected damage map, not a quantitative continuum-damage field. The fiber-break-core in-plane reduction is a separate channel (`mesh.in_plane_damage_factors`) and is not currently overlaid on the heatmap.
 
 ## Limitations
 
