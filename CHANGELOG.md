@@ -8,6 +8,21 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **fe3d buckling silent fallbacks now surfaced via `AnalysisResults.notes`.**
+  Previously, `fe3d_cai_buckling()` returned `(sigma_pristine_MPa, 0.0)` when
+  the eigensolver found no positive eigenvalue or raised an exception, and
+  `BvidAnalysis.run()` silently used FPF instead when the buckling result was
+  below 5% of pristine ("plausibility gate"). The user saw `knockdown = 1.0`
+  in the no-eigenvalue case and had no way to know that the buckling solve
+  had quietly given up. `AnalysisResults` gains a `notes: list[str]` field
+  populated by the analysis backends; `fe3d_cai_buckling()` now returns
+  `(sigma, lambda_crit, notes)` so the caller can merge solver diagnostics
+  into the result. The GUI Summary tab appends these notes (prefixed with
+  ⚠) under the existing "--- Notes ---" section, and `AnalysisResults.summary()`
+  / `to_dict()` include them in the text and JSON output. Two new tests
+  in `tests/analysis/test_fe3d_buckling.py` cover the eigensolver-failure
+  path end-to-end via `monkeypatch`.
+
 - **fe3d damage factor now applied component-wise to the elasticity matrix.**
   The previous `DAMAGE_STIFFNESS_FACTOR = 0.30` was scaled into every entry of
   the 6×6 `_C_global` matrix in `analysis/fe_tier._build_elements`, uniformly

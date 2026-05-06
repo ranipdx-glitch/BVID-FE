@@ -115,6 +115,12 @@ def _build_limitation_notes(results: AnalysisResults) -> list[str]:
             "failure modes."
         )
 
+    # 5. Runtime notes from the analysis backend (silent fallbacks etc.).
+    #    These describe what the solver actually did this run, as opposed
+    #    to the input-driven caveats above.
+    for runtime_note in results.notes:
+        notes.append(f"⚠ {runtime_note}")
+
     return notes
 
 

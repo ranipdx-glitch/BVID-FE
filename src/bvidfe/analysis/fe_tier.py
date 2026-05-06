@@ -260,7 +260,7 @@ def fe3d_cai_buckling(
     lam: Laminate,
     sigma_pristine_MPa: float,
     sigma_ref_MPa: float = 1.0,
-) -> tuple[float, float]:
+) -> tuple[float, float, List[str]]:
     """3D FE compression-after-impact via true linear buckling eigensolve.
 
     Assembles K and K_g under a constant uniaxial pre-stress sigma_ref along x
@@ -277,19 +277,14 @@ def fe3d_cai_buckling(
 
     Returns
     -------
-    (sigma_critical_MPa, lambda_crit)
+    (sigma_critical_MPa, lambda_crit, notes)
         sigma_critical_MPa : min(lambda_crit * sigma_ref, sigma_pristine_MPa)
         lambda_crit        : smallest positive buckling load factor (0 if solve failed)
-
-    Notes
-    -----
-    If no positive eigenvalue is found or the eigensolver raises, this
-    function silently returns ``(sigma_pristine_MPa, 0.0)``. Downstream,
-    ``BvidAnalysis.run()`` therefore reports ``knockdown = 1.0`` in that
-    case — which can be misleading. The caller also imposes a
-    "buckling plausibility" gate (``sigma_buckling >= 0.05 * sigma_0``)
-    and silently falls back to first-ply-failure if it trips. Treat
-    ``fe3d`` knockdowns from this path as approximate.
+        notes              : list of human-readable diagnostic strings emitted
+                             during this call (e.g. eigensolver failure /
+                             no-positive-eigenvalue fallback). Empty when the
+                             solve was clean. Surfaced via
+                             ``AnalysisResults.notes``.
     """
     _guard_problem_size(cfg)
     t0 = time.time()
@@ -375,11 +370,21 @@ def fe3d_cai_buckling(
         positive_eigs = [float(e) for e in eigs if e > 1e-6]
         if not positive_eigs:
             _log.info("fe3d buckling: no positive eigenvalue, returning pristine")
-            return sigma_pristine_MPa, 0.0
+            note = (
+                "fe3d buckling: eigensolver returned no positive eigenvalue; "
+                "fell back to pristine strength (knockdown=1.0 may not reflect "
+                "actual damage effect)"
+            )
+            return sigma_pristine_MPa, 0.0, [note]
         lambda_crit = min(positive_eigs)
     except Exception as exc:  # noqa: BLE001
         _log.warning("fe3d buckling eigensolve failed: %s", exc)
-        return sigma_pristine_MPa, 0.0
+        note = (
+            f"fe3d buckling: eigensolver raised {type(exc).__name__}: {exc}; "
+            "fell back to pristine strength (knockdown=1.0 does not reflect "
+            "actual damage effect)"
+        )
+        return sigma_pristine_MPa, 0.0, [note]
 
     sigma_critical = lambda_crit * sigma_ref_MPa
     _log.info(
@@ -388,7 +393,7 @@ def fe3d_cai_buckling(
         sigma_critical,
         time.time() - t0,
     )
-    return min(sigma_critical, sigma_pristine_MPa), lambda_crit
+    return min(sigma_critical, sigma_pristine_MPa), lambda_crit, []
 
 
 def fe3d_cai(
@@ -402,8 +407,14 @@ def fe3d_cai(
     Primary path: true linear buckling eigensolve (fe3d_cai_buckling).
     Fallback: first-ply-failure on damaged mesh (_fe3d_cai_first_ply_failure).
     Returns the smaller of the two — whichever failure mode governs.
+
+    Notes from the buckling solve are discarded by this convenience wrapper;
+    callers that need them should invoke fe3d_cai_buckling directly (as
+    BvidAnalysis.run does).
     """
-    sigma_buckling, lambda_crit = fe3d_cai_buckling(cfg, damage, lam, sigma_pristine_MPa)
+    sigma_buckling, _lambda_crit, _notes = fe3d_cai_buckling(
+        cfg, damage, lam, sigma_pristine_MPa
+    )
     sigma_fpf = _fe3d_cai_first_ply_failure(cfg, damage, lam, sigma_pristine_MPa)
     return min(sigma_buckling, sigma_fpf)
 

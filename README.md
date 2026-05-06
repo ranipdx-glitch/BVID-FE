@@ -165,7 +165,7 @@ knockdown = residual_strength_MPa / pristine_strength_MPa
   - For **CAI**, `semi_analytical ≤ empirical` always (the buckling floor only lowers the residual). `fe3d` is independent and dominated by stress concentration at the damage boundary rather than damage magnitude — see the flat-vs-energy caveat in [Limitations](#limitations).
 - For **energy-scaling studies**, prefer `empirical` (Soutis scales with DPA) or `semi_analytical` (Rayleigh-Ritz scales with ellipse size). `fe3d` is intended for stress-field context and through-thickness damage visualization, not energy-dependent knockdown curves.
 - A few silent fallbacks affect interpretation:
-  - `fe3d` buckling: if no positive eigenvalue is found (or the eigenvalue is < 5% of σ₀), the buckling result is discarded and FPF — or, in pure-buckling failure, σ₀ — is reported instead. A `knockdown` of 1.0 from `fe3d` may therefore mean "buckling solve unconverged" rather than "no damage effect".
+  - `fe3d` buckling: if no positive eigenvalue is found (or the eigenvalue is < 5% of σ₀), the buckling result is discarded and FPF — or, in pure-buckling failure, σ₀ — is reported instead. The reason is now surfaced as a string in `AnalysisResults.notes` (also rendered in the GUI Summary tab and in `result.summary()` / `result.to_dict()`), so a `knockdown` of 1.0 from `fe3d` is distinguishable from "buckling solve unconverged" by inspecting `result.notes`.
   - DPA is globally capped at 80% of panel area (`src/bvidfe/impact/mapping.py`); above this damage threshold all three tiers saturate.
 
 ### Damage severity heatmap
