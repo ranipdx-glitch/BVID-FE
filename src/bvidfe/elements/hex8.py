@@ -15,6 +15,35 @@ import numpy as np
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.elements.gauss import gauss_points_hex
 
+
+class DegenerateElementError(ValueError):
+    """Raised when an element has a non-positive Jacobian determinant.
+
+    Subclassed from ``ValueError`` so that defensive ``except ValueError``
+    handlers still catch it, while letting callers that want to react to
+    this specific failure mode catch it precisely (analogous to
+    ``CScanSchemaError`` in ``bvidfe.damage.io``).
+    """
+
+
+def _validate_jacobian(detJ: float, xi: float, eta: float, zeta: float,
+                       node_coords: np.ndarray) -> None:
+    """Raise DegenerateElementError if the Jacobian determinant is non-positive.
+
+    A non-positive ``detJ`` means the element is either inverted (negative
+    determinant — node ordering wrong, or the element has folded over itself)
+    or singular (zero determinant — two or more nodes coincide). Either case
+    silently produces NaN/Inf in ``np.linalg.inv(J)`` and corrupts every
+    downstream stiffness assembly. Catch it loudly here so users get a
+    reproducible mesh-quality error instead of opaque NaNs in their results.
+    """
+    if detJ <= 0:
+        raise DegenerateElementError(
+            f"Hex8 element Jacobian non-positive: detJ={detJ:.3e} at "
+            f"natural coords (xi, eta, zeta)=({xi:g}, {eta:g}, {zeta:g}). "
+            f"Node coordinates: {node_coords.tolist()}."
+        )
+
 # Node natural coordinates (xi, eta, zeta)
 _NODE_COORDS = np.array(
     [
@@ -118,6 +147,7 @@ class Hex8Element:
         dN_nat = self.shape_derivatives(xi, eta, zeta)  # (3, 8)
         J = self.jacobian(xi, eta, zeta)  # (3, 3)
         detJ = np.linalg.det(J)
+        _validate_jacobian(detJ, xi, eta, zeta, self.node_coords)
         J_inv = np.linalg.inv(J)
         dN_phys = J_inv @ dN_nat  # (3, 8) — d N_k / d x, d y, d z
         Nx = dN_phys[0]  # (8,)
@@ -195,6 +225,7 @@ class Hex8Element:
             dN_nat = self.shape_derivatives(xi, eta, zeta)  # (3, 8)
             J = self.jacobian(xi, eta, zeta)
             detJ = np.linalg.det(J)
+            _validate_jacobian(detJ, xi, eta, zeta, self.node_coords)
             J_inv = np.linalg.inv(J)
             gradN = J_inv @ dN_nat  # (3, 8) — d N_k/d{x,y,z}
 

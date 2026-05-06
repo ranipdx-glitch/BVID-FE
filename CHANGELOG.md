@@ -8,6 +8,22 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **Hex8 elements now validate the Jacobian determinant.** `Hex8Element.B_matrix`
+  and `Hex8Element.geometric_stiffness_matrix` previously called
+  `np.linalg.inv(J)` with no check on `np.linalg.det(J)` — an inverted element
+  (det < 0, from wrong node ordering) silently produced negative volume in
+  the stiffness integral, and a singular element (det ≈ 0, from collapsed
+  nodes) silently produced NaNs that propagated into the global K and
+  corrupted every downstream eigensolve / FPF result. Both call sites now
+  invoke a shared `_validate_jacobian` helper that raises a new
+  `DegenerateElementError(ValueError)` with the offending detJ value, the
+  natural-coordinate Gauss-point location, and the full node-coordinate
+  list, so users get a reproducible "bad mesh" error instead of opaque
+  NaNs further down the pipeline. `Hex8iElement.stiffness_matrix` (which
+  inverts a separate centre-Jacobian for its bubble-mode Benh derivation)
+  has the same guard. The structured brick mesh produced by `build_fe_mesh`
+  is unaffected — regular cuboid grids always have strictly positive detJ.
+
 - **Tsai-Wu now uses through-thickness strengths and the 1-3 shear strength.**
   `failure/tsai_wu.py` previously computed `F3 = 1/Yt - 1/Yc`, `F33 =
   1/(Yt*Yc)`, and `F55 = 1/S12**2`. The first two reuse the in-plane
