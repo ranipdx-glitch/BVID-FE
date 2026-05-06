@@ -8,6 +8,26 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **C-scan loader hardens type and finiteness checks.** ``_validate_dict``
+  in ``damage/io.py`` previously had several gaps: a string in a numeric
+  field crashed at the ``< 0`` comparison with a raw ``TypeError``;
+  ``NaN`` and ``Inf`` (both JSON-encodable via Python's default
+  ``allow_nan=True``) passed through into the analysis pipeline; a non-
+  dict entry in the ``delaminations`` array crashed the
+  ``"k" not in d`` check; ``fiber_break_radius_mm < 0`` was accepted;
+  ``interface_index = 2.5`` was silently truncated to ``2``; and unknown
+  top-level / per-delamination fields were dropped silently, so a typo
+  like ``"dent_dept_mm"`` (missing the trailing 'h') reported as
+  ``missing required field: dent_depth_mm`` without flagging the typo.
+  Fixed by routing every numeric field through a new
+  ``_require_finite_number`` helper that raises ``CScanSchemaError`` on
+  non-numeric, NaN, or Inf, plus per-delamination dict-shape checks,
+  ``fiber_break_radius_mm >= 0``, strict-int ``interface_index``, and a
+  ``UserWarning`` (forward-compatible — does not fail the load) on
+  unknown fields. Eight new tests in ``tests/damage/test_io.py`` cover
+  the string-in-numeric, NaN, Inf, negative-radius, non-object-element,
+  unknown-field warning, and non-int-interface-index paths.
+
 - **Invalid `BVIDFE_LOG_LEVEL` / `BVIDFE_FE3D_MAX_DOF` no longer crash
   imports.** Both env vars were read at module import time:
   ``logging.setLevel(os.environ.get(...).upper())`` raised on a typo
