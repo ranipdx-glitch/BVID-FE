@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen.svg)](https://github.com/elhajjar1/BVID-FE/actions)
+[![Tests](https://img.shields.io/badge/tests-309%20passing-brightgreen.svg)](https://github.com/elhajjar1/BVID-FE/actions)
 
 A Python library for predicting residual strength and stiffness of fiber-reinforced composite laminates containing Barely Visible Impact Damage (BVID).
 
@@ -182,11 +182,9 @@ The colorbar is therefore in units of "stacked OOP-stiffness loss contributions"
 
 - Material calibration constants (`olsson_alpha`, `soutis_k_s`, `dent_beta`, and related parameters) are reasonable defaults for typical CFRP systems. Precise values need to be calibrated against material-specific coupon test data before use in certification.
 - LaRC05 is implemented as a minimal Hashin-3D reduction. Full plane-search fiber-kinking is deferred to a future release.
-- The `fe3d` tier uses stiffness reduction at delaminated interfaces instead of true cohesive surfaces with bilinear traction-separation laws.
-- **The `fe3d` tier's knockdown is approximately flat vs. impact energy** above the Olsson threshold, because the damaged-mesh first-ply-failure strain is controlled by stress concentration at the healthy/damaged boundary (not damage magnitude), and the uniform-pre-stress buckling path falls back to FPF for small damages. For energy-dependent knockdown curves use `tier="empirical"` (Soutis scales with DPA) or `tier="semi_analytical"` (Rayleigh-Ritz scales with ellipse size). The `fe3d` tier is most useful for stress-field context and visualization, not for energy-scaling studies. A proper fix — in-plane pre-stress BCs + cohesive surfaces — is v0.3.0 scope.
-- `fe3d` CAI uses first-ply-failure on the damaged mesh, not a buckling eigenvalue solve; the eigenvalue approach is deferred to v0.2.0.
-- No GUI in v0.1.0 (deferred to v0.2.0).
-- No validated datasets in v0.1.0; comparison against published Soutis, Caprino, and NASA datasets is planned for v0.2.0.
+- The `fe3d` tier uses component-wise stiffness reduction at delaminated interfaces (in-plane preserved, out-of-plane reduced) instead of true cohesive surfaces with bilinear traction-separation laws. Cohesive surfaces are deferred to a future release.
+- **The `fe3d` tier's knockdown is partially insensitive to impact energy** above the Olsson threshold. Linear buckling (`fe3d_cai_buckling`) now responds to delamination size, but the FPF fallback strain is controlled by stress concentration at the healthy/damaged boundary rather than damage magnitude. For energy-dependent knockdown curves prefer `tier="empirical"` (Soutis scales with DPA) or `tier="semi_analytical"` (Rayleigh-Ritz scales with ellipse size). The `fe3d` tier is most useful for stress-field context, through-thickness damage visualization, and buckling-driven failure modes. Full energy-monotonicity (in-plane pre-stress BCs + cohesive surfaces) is v0.3.0 scope.
+- No validated datasets included; comparison against published Soutis, Caprino, and NASA datasets is on the roadmap.
 
 ## Citation
 

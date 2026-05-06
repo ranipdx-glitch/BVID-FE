@@ -6,6 +6,23 @@ All notable changes to BVID-FE are documented in this file.
 
 In-progress work toward v0.2.0. No tag yet.
 
+### Changed
+
+- **README + ARCHITECTURE refreshed to match v0.2.0-dev reality.** The
+  README's Limitations section claimed "No GUI in v0.1.0", "fe3d CAI
+  uses first-ply-failure, not a buckling eigenvalue solve", and "no
+  validated datasets in v0.1.0" — three statements that were correct
+  for v0.1.0 but stale for v0.2.0-dev (where the GUI ships, the
+  buckling eigensolve is implemented, and the validation harness is in
+  the repo). The test-count badge advertised 216 passing; the actual
+  count is 309. ``ARCHITECTURE.md``'s module catalog had no entry for
+  the ``gui/`` package, the dependency diagram did not reach ``cli``
+  or ``gui``, and the v0.2.0 roadmap section was a list of items that
+  have since shipped. All three pages updated to reflect the current
+  reality, with a "Shipped in v0.2.0-dev" / "Planned (post-v0.2.0)"
+  split on the roadmap so future work and historical claims do not
+  drift back into confusion.
+
 ### Added
 
 - **Repo hygiene: dependency caps, headless requirements.txt, top-level
