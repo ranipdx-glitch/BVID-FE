@@ -8,6 +8,22 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **Parametric sweeps no longer lose partial results on per-iteration
+  failure.** ``sweep_energies`` / ``sweep_layups`` / ``sweep_thicknesses``
+  previously called ``_run_one`` unguarded — a single failed iteration
+  (Olsson out-of-regime, mesh degeneracy, Tsai-Wu invalid combination)
+  raised out of the sweep and the CSV was never written, so a 12-energy
+  sweep with one bad row dropped 11 valid results on the floor. Each
+  entry point now accepts an ``on_error`` keyword (default
+  ``"raise"`` for backward compatibility, ``"skip"`` to fill the failed
+  row with NaN numerics + an ``error`` column and continue, ``"warn"``
+  to do the same plus emit a ``UserWarning``) and an optional
+  ``progress_callback(i_done, n_total)``. With ``on_error="skip"`` the
+  partial CSV is preserved with the same row count as the input
+  iterable. Five new tests in ``tests/sweep/test_sweep.py`` cover the
+  raise / skip / warn paths, the partial CSV, the progress callback,
+  and rejection of bogus ``on_error`` values.
+
 - **CLI now validates inputs at parse time instead of deep in the pipeline.**
   Several `bvidfe` CLI flags previously accepted invalid values that only
   surfaced as opaque errors much later: `--material IM7/8553` (typo)
