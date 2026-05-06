@@ -71,3 +71,24 @@ def test_uniaxial_xz_shear_uses_s13():
     # Override S13 to be twice as strong — same applied stress, lower index
     stiffer = replace(base, S13=2.0 * base.S12)
     assert tsai_wu_index(stiffer, s) < 0.5
+
+
+def test_tsai_wu_index_matches_explicit_nested_sums():
+    """Locks the vectorised tsai_wu_index against the explicit nested-sum
+    formula F_i s_i + F_ij s_i s_j. The vectorised form uses
+    F.dot(s) + s.dot(Q.dot(s)), which is mathematically identical but
+    different floating-point evaluation order — this test catches any
+    accidental regression to a wrong indexing or a sign flip."""
+    import numpy as np
+
+    from bvidfe.failure.tsai_wu import _tsai_wu_coefficients
+
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    F, Q = _tsai_wu_coefficients(m)
+    rng = np.random.default_rng(42)
+    for _ in range(50):
+        s = rng.standard_normal(6) * 100.0
+        explicit = sum(F[i] * s[i] for i in range(6)) + sum(
+            Q[i][j] * s[i] * s[j] for i in range(6) for j in range(6)
+        )
+        assert tsai_wu_index(m, s.tolist()) == pytest.approx(explicit, rel=1e-12, abs=1e-9)

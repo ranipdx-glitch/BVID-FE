@@ -23,6 +23,43 @@ In-progress work toward v0.2.0. No tag yet.
   split on the roadmap so future work and historical claims do not
   drift back into confusion.
 
+### Changed
+
+- **Refactor pass: tsai_wu vectorisation + heartbeat helper + fe3d pre-flight
+  helper + dead-code removal.** Four targeted refinements (each independently
+  verified by an explore-agent and locked by unit / equivalence tests):
+  - ``tsai_wu_index`` no longer iterates 36 times in pure Python per call.
+    ``_tsai_wu_coefficients`` now returns ``(F: np.ndarray, Q: np.ndarray)``
+    instead of a Python list / list-of-lists, and the index is computed via
+    ``F @ s + s @ Q @ s`` (BLAS-routed dot + bilinear form). A new
+    ``test_tsai_wu_index_matches_explicit_nested_sums`` test pins 50
+    randomised stress vectors to the explicit nested-sum form within
+    ``rel=1e-12``. ``tsai_wu_strength_uniaxial`` is unchanged because
+    ``F[i]`` and ``Q[i][i]`` work identically on numpy arrays.
+  - The duplicated heartbeat-progress loop in ``AnalysisWorker.run`` and
+    the per-iteration body of ``SweepWorker.run`` is now a single helper
+    ``gui.workers._run_with_heartbeat(work, on_progress, *, start_pct,
+    end_pct, interval_s, label)`` that spawns a daemon thread, ticks the
+    progress callback toward ``end_pct`` at ``interval_s`` intervals, and
+    re-raises a ``RuntimeError`` carrying the original traceback on
+    failure. ``AnalysisWorker.run`` drops from ~40 lines to ~16; the
+    ``SweepWorker`` per-energy body drops from ~19 lines to ~10. The
+    ``TierComparisonWorker`` is intentionally NOT migrated because it
+    ticks per-pair (synchronous, step-based) rather than per-second.
+  - The duplicated fe3d pre-flight prologue (``_guard_problem_size`` +
+    ``build_fe_mesh`` + ``_build_elements`` + log lines) shared by
+    ``fe3d_cai_buckling``, ``_fe3d_cai_first_ply_failure``, and
+    ``fe3d_tai`` is now a single ``analysis.fe_tier._fe3d_preflight(cfg,
+    damage, lam, *, label) -> (mesh, elements, t0)`` helper. Each call
+    site drops from ~6 lines to 1; ``fe3d_tai`` now also emits per-stage
+    timing logs for parity with the CAI paths.
+  - ``_k_contact_hertz_linearized`` (a back-compat alias in
+    ``impact/olsson.py``) is deleted — re-verified to have zero callers
+    in src/, tests/, examples/, scripts/, validation/, or docs/. The
+    second prior dead-code candidate ``tsai_wu_strength_uniaxial`` was
+    re-checked and KEPT (six active calls in
+    ``tests/failure/test_tsai_wu.py``).
+
 ### Added
 
 - **`tests/validation/` directory with five new analytical-reference tests.**

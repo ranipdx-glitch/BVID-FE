@@ -162,6 +162,36 @@ def _resolve_material(cfg: AnalysisConfig):
     return cfg.material
 
 
+def _fe3d_preflight(
+    cfg: AnalysisConfig,
+    damage: DamageState,
+    lam: Laminate,
+    *,
+    label: str = "fe3d",
+) -> tuple[FeMesh, List[Hex8Element], float]:
+    """Run the size guard, build the damaged mesh, and build elements.
+
+    Factors the duplicated pre-flight prologue used by every fe3d entry
+    point (``fe3d_cai_buckling``, ``_fe3d_cai_first_ply_failure``,
+    ``fe3d_tai``). The ``label`` differentiates the per-stage log line so
+    a stderr trace still distinguishes "fe3d FPF" from "fe3d buckling".
+
+    Returns
+    -------
+    (mesh, elements, t0)
+        ``t0`` is ``time.time()`` captured before the mesh build, suitable
+        for relative timing logs in the caller.
+    """
+    _guard_problem_size(cfg)
+    t0 = time.time()
+    _log.info("%s: mesh build start", label)
+    mesh = build_fe_mesh(cfg, damage)
+    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
+    elements = _build_elements(mesh, lam)
+    _t("elements built", t0)
+    return mesh, elements, t0
+
+
 def _solve_failure_strain_analytic(
     cfg: AnalysisConfig,
     mesh: FeMesh,
@@ -270,13 +300,7 @@ def _fe3d_cai_first_ply_failure(
     Original v0.1.0 implementation — bisects on applied strain until LaRC05 failure
     index reaches 1 on the damaged mesh. Retained as fallback / comparison path.
     """
-    _guard_problem_size(cfg)
-    t0 = time.time()
-    _log.info("fe3d FPF: mesh build start")
-    mesh = build_fe_mesh(cfg, damage)
-    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
-    elements = _build_elements(mesh, lam)
-    _t("elements built", t0)
+    mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d FPF")
     strain_at_failure = _solve_failure_strain_analytic(
         cfg,
         mesh,
@@ -327,13 +351,7 @@ def fe3d_cai_buckling(
                              solve was clean. Surfaced via
                              ``AnalysisResults.notes``.
     """
-    _guard_problem_size(cfg)
-    t0 = time.time()
-    _log.info("fe3d buckling: mesh build start")
-    mesh = build_fe_mesh(cfg, damage)
-    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
-    elements = _build_elements(mesh, lam)
-    _t("elements built", t0)
+    mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d buckling")
 
     # Assemble elastic stiffness K
     K = assemble_global_stiffness(elements, mesh.element_dof_maps, mesh.n_dof)
@@ -467,9 +485,7 @@ def fe3d_tai(
     sigma_pristine_MPa: float,
 ) -> float:
     """3D FE tension-after-impact residual strength (MPa)."""
-    _guard_problem_size(cfg)
-    mesh = build_fe_mesh(cfg, damage)
-    elements = _build_elements(mesh, lam)
+    mesh, elements, _t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d TAI")
     strain_at_failure = _solve_failure_strain_analytic(
         cfg,
         mesh,

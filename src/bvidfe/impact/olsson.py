@@ -179,12 +179,6 @@ def _k_contact(lam: Laminate, imp: ImpactorGeometry, P: float) -> float:
     raise ValueError(f"impactor shape {imp.shape!r} not recognized")
 
 
-# Back-compat alias — external callers (tests) may import this name.
-def _k_contact_hertz_linearized(lam: Laminate, imp: ImpactorGeometry, P: float) -> float:
-    """Back-compat wrapper: dispatches on impactor shape."""
-    return _k_contact(lam, imp, P)
-
-
 def threshold_load(lam: Laminate, pan: PanelGeometry, imp: ImpactorGeometry) -> float:
     """Olsson quasi-static damage-threshold load Pc (Newtons).
 

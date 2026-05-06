@@ -17,17 +17,19 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
+import numpy as np
+
 from bvidfe.core.material import OrthotropicMaterial
 
 
 def _tsai_wu_coefficients(m: OrthotropicMaterial):
-    """Return (F_linear, F_quad) where F_linear is a 6-vector and F_quad is a 6x6 matrix."""
+    """Return (F_linear, F_quad) where F_linear is a (6,) array and F_quad is a (6, 6) array."""
     Xt, Xc, Yt, Yc, S12, S23 = m.Xt, m.Xc, m.Yt, m.Yc, m.S12, m.S23
     Zt, Zc, S13 = m.Zt_resolved, m.Zc_resolved, m.S13_resolved
     F1 = 1.0 / Xt - 1.0 / Xc
     F2 = 1.0 / Yt - 1.0 / Yc
     F3 = 1.0 / Zt - 1.0 / Zc
-    F = [F1, F2, F3, 0.0, 0.0, 0.0]
+    F = np.array([F1, F2, F3, 0.0, 0.0, 0.0], dtype=float)
 
     F11 = 1.0 / (Xt * Xc)
     F22 = 1.0 / (Yt * Yc)
@@ -39,16 +41,16 @@ def _tsai_wu_coefficients(m: OrthotropicMaterial):
     F13 = -0.5 * math.sqrt(F11 * F33)
     F23 = -0.5 * math.sqrt(F22 * F33)
 
-    Q = [[0.0] * 6 for _ in range(6)]
-    Q[0][0] = F11
-    Q[1][1] = F22
-    Q[2][2] = F33
-    Q[3][3] = F44
-    Q[4][4] = F55
-    Q[5][5] = F66
-    Q[0][1] = Q[1][0] = F12
-    Q[0][2] = Q[2][0] = F13
-    Q[1][2] = Q[2][1] = F23
+    Q = np.zeros((6, 6), dtype=float)
+    Q[0, 0] = F11
+    Q[1, 1] = F22
+    Q[2, 2] = F33
+    Q[3, 3] = F44
+    Q[4, 4] = F55
+    Q[5, 5] = F66
+    Q[0, 1] = Q[1, 0] = F12
+    Q[0, 2] = Q[2, 0] = F13
+    Q[1, 2] = Q[2, 1] = F23
     return F, Q
 
 
@@ -82,9 +84,13 @@ def tsai_wu_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
         Dimensionless failure index. >= 1 means failure.
     """
     F, Q = _tsai_wu_coefficients(m)
-    linear = sum(F[i] * stress[i] for i in range(6))
-    quad = sum(Q[i][j] * stress[i] * stress[j] for i in range(6) for j in range(6))
-    return linear + quad
+    s = np.asarray(stress, dtype=float)
+    # Bilinear form: sum_i F_i s_i  +  sum_{i,j} Q_{ij} s_i s_j
+    # is mathematically identical to the nested-sum form by definition of
+    # vector-vector dot product and the bilinear-form contraction; numpy
+    # routes both through BLAS so a single Tsai-Wu call drops from ~36
+    # Python-level multiplications to two C-level dot products.
+    return float(F.dot(s) + s.dot(Q.dot(s)))
 
 
 def tsai_wu_strength_uniaxial(m: OrthotropicMaterial, direction: int, sign: int) -> float:
