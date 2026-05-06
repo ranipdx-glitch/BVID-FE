@@ -23,6 +23,44 @@ In-progress work toward v0.2.0. No tag yet.
   split on the roadmap so future work and historical claims do not
   drift back into confusion.
 
+### Added
+
+- **fe3d tier now exercised in CI as a monitoring step.** The CI
+  ``validation`` job previously ran only the empirical tier (``python
+  validation/validate_bvid_public.py --gate``). A new step runs the
+  same harness with ``--tier=fe3d --max-cases=3``, marked
+  ``continue-on-error: true`` so failures are advisory and don't block
+  merges. The validation script gains:
+  - A new ``_TIER_GATE_MULTIPLIER`` table — empirical and
+    semi_analytical use the original 1.25× target_mae_pct slack;
+    fe3d uses 2.0× to acknowledge the documented energy-flatness
+    caveat without flapping the CI on regressions still inside the
+    model uncertainty.
+  - A new ``--max-cases N`` flag that truncates each dataset to the
+    first ``N`` cases. Lets the fe3d step cap CI runtime at ~45 s
+    even if the dataset later grows to dozens of cases. Default is
+    ``None`` (full dataset), preserving the existing empirical-gate
+    behaviour exactly.
+
+- **Vectorised batch failure-criterion functions.** New
+  ``larc05_index_batch(material, stresses)`` and
+  ``tsai_wu_index_batch(material, stresses)`` evaluate their
+  respective criteria over a Voigt-6 batch in a single numpy /
+  ``np.einsum`` pass. ``FailureEvaluator.evaluate`` is refactored
+  to call ``_index_batch`` once on the entire ``(n_elem, n_gp, 6)``
+  field, then ``np.argmax`` to pick the critical (element, Gauss
+  point) — replacing the prior nested Python loop that paid the
+  function-call overhead n_elem × n_gp times. Three new tests in
+  ``tests/failure/test_evaluator.py`` lock numerical equivalence
+  between the batch and scalar forms (``rtol=1e-12``) and one
+  test asserts the new ``evaluate`` agrees with the explicit
+  nested-loop reference. The batch helpers are also intended as
+  the prerequisite for a future vectorisation of
+  ``_solve_failure_strain_analytic`` (deferred — see CHANGELOG
+  rationale: small inner-loop sizes + weak regression coverage on
+  the analytic strain solve mean the speedup-vs-risk tradeoff
+  doesn't yet justify it).
+
 ### Changed
 
 - **Refactor pass: tsai_wu vectorisation + heartbeat helper + fe3d pre-flight

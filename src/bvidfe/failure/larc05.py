@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import numpy as np
+
 from bvidfe.core.material import OrthotropicMaterial
 
 
@@ -72,3 +74,46 @@ def larc05_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
         modes.append((s2 / m.Yc) ** 2 + (t12 / m.S12) ** 2 + (t23 / m.S23) ** 2)
 
     return max(modes)
+
+
+def larc05_index_batch(
+    m: OrthotropicMaterial, stresses: np.ndarray
+) -> np.ndarray:
+    """Vectorised LaRC05 failure index across a batch of Voigt-6 stresses.
+
+    Equivalent to ``np.array([larc05_index(m, s) for s in stresses])`` but
+    evaluates the four mode branches with ``np.where`` masks instead of
+    Python conditionals so a (n, 6) input runs in a single BLAS-routed
+    pass. Used by ``FailureEvaluator`` and intended for future use in the
+    ``_solve_failure_strain_analytic`` strain-bisection inner loop.
+
+    Parameters
+    ----------
+    m : OrthotropicMaterial
+        Material card; same Xt/Xc/Yt/Yc/S12/S23 used as in ``larc05_index``.
+    stresses : np.ndarray
+        Shape ``(..., 6)`` array of Voigt-6 stress vectors. The leading
+        axes are preserved in the output.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``stresses.shape[:-1]``. Each entry is the maximum of the
+        fiber-mode index and the matrix-mode index for that stress.
+    """
+    s = np.asarray(stresses, dtype=float)
+    if s.shape[-1] != 6:
+        raise ValueError(f"stresses must have last axis 6 (got {s.shape!r})")
+    s1 = s[..., 0]
+    s2 = s[..., 1]
+    t23 = s[..., 3]
+    t12 = s[..., 5]
+    # Fiber mode: tension uses Xt, compression uses Xc — np.where picks the
+    # right denominator element-wise without a Python branch.
+    Xden = np.where(s1 >= 0, m.Xt, m.Xc)
+    fiber_idx = (s1 / Xden) ** 2
+    # Matrix mode: same shear contribution either way; tension uses Yt,
+    # compression uses Yc.
+    Yden = np.where(s2 >= 0, m.Yt, m.Yc)
+    matrix_idx = (s2 / Yden) ** 2 + (t12 / m.S12) ** 2 + (t23 / m.S23) ** 2
+    return np.maximum(fiber_idx, matrix_idx)

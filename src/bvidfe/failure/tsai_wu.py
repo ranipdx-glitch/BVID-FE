@@ -93,6 +93,39 @@ def tsai_wu_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
     return float(F.dot(s) + s.dot(Q.dot(s)))
 
 
+def tsai_wu_index_batch(
+    m: OrthotropicMaterial, stresses: np.ndarray
+) -> np.ndarray:
+    """Vectorised Tsai-Wu failure index across a batch of Voigt-6 stresses.
+
+    Equivalent to ``np.array([tsai_wu_index(m, s) for s in stresses])`` but
+    evaluates ``F · s + s · Q · s`` once for the whole batch via numpy
+    einsum. Used by ``FailureEvaluator`` and intended for future use in
+    the ``_solve_failure_strain_analytic`` strain-bisection inner loop.
+
+    Parameters
+    ----------
+    m : OrthotropicMaterial
+        Material card; same fields as in ``tsai_wu_index``.
+    stresses : np.ndarray
+        Shape ``(..., 6)`` array of Voigt-6 stress vectors. The leading
+        axes are preserved in the output.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``stresses.shape[:-1]``. Each entry is the dimensionless
+        Tsai-Wu failure index.
+    """
+    s = np.asarray(stresses, dtype=float)
+    if s.shape[-1] != 6:
+        raise ValueError(f"stresses must have last axis 6 (got {s.shape!r})")
+    F, Q = _tsai_wu_coefficients(m)
+    linear = s @ F  # (...,)
+    quad = np.einsum("...i,ij,...j->...", s, Q, s)
+    return linear + quad
+
+
 def tsai_wu_strength_uniaxial(m: OrthotropicMaterial, direction: int, sign: int) -> float:
     """Return the applied uniaxial stress magnitude |sigma| at which the Tsai-Wu
     index equals 1 for sigma_(direction) = sign * |sigma|, other components zero.
