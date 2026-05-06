@@ -1,4 +1,16 @@
-"""3D Tsai-Wu anisotropic failure criterion (Voigt 6-vector, material frame)."""
+"""3D Tsai-Wu anisotropic failure criterion (Voigt 6-vector, material frame).
+
+Voigt convention used here matches the rest of the codebase (Hex8Element):
+    [sigma_xx, sigma_yy, sigma_zz, tau_yz, tau_xz, tau_xy]
+which makes index 3 the 2-3 shear (S23), index 4 the 1-3 shear (S13), and
+index 5 the in-plane shear (S12).
+
+Through-thickness strengths come from ``OrthotropicMaterial.Zt_resolved`` /
+``Zc_resolved`` / ``S13_resolved``, which fall back to the in-plane
+transverse / shear values when the user has not measured the through-thickness
+ones (transverse-isotropy assumption for unidirectional CFRP). With those
+defaults the formula reduces to the prior plane-stress-style code.
+"""
 
 from __future__ import annotations
 
@@ -11,17 +23,18 @@ from bvidfe.core.material import OrthotropicMaterial
 def _tsai_wu_coefficients(m: OrthotropicMaterial):
     """Return (F_linear, F_quad) where F_linear is a 6-vector and F_quad is a 6x6 matrix."""
     Xt, Xc, Yt, Yc, S12, S23 = m.Xt, m.Xc, m.Yt, m.Yc, m.S12, m.S23
+    Zt, Zc, S13 = m.Zt_resolved, m.Zc_resolved, m.S13_resolved
     F1 = 1.0 / Xt - 1.0 / Xc
     F2 = 1.0 / Yt - 1.0 / Yc
-    F3 = 1.0 / Yt - 1.0 / Yc
+    F3 = 1.0 / Zt - 1.0 / Zc
     F = [F1, F2, F3, 0.0, 0.0, 0.0]
 
     F11 = 1.0 / (Xt * Xc)
     F22 = 1.0 / (Yt * Yc)
-    F33 = 1.0 / (Yt * Yc)
-    F44 = 1.0 / (S23**2)
-    F55 = 1.0 / (S12**2)
-    F66 = 1.0 / (S12**2)
+    F33 = 1.0 / (Zt * Zc)
+    F44 = 1.0 / (S23**2)  # 2-3 shear (Voigt index 3)
+    F55 = 1.0 / (S13**2)  # 1-3 shear (Voigt index 4) — was S12 (a real bug)
+    F66 = 1.0 / (S12**2)  # 1-2 in-plane shear (Voigt index 5)
     F12 = -0.5 * math.sqrt(F11 * F22)
     F13 = -0.5 * math.sqrt(F11 * F33)
     F23 = -0.5 * math.sqrt(F22 * F33)

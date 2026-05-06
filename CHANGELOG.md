@@ -8,6 +8,31 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Fixed
 
+- **Tsai-Wu now uses through-thickness strengths and the 1-3 shear strength.**
+  `failure/tsai_wu.py` previously computed `F3 = 1/Yt - 1/Yc`, `F33 =
+  1/(Yt*Yc)`, and `F55 = 1/S12**2`. The first two reuse the in-plane
+  transverse strengths for the through-thickness direction (a missing-
+  parameter conflation, since `OrthotropicMaterial` had no `Zt`/`Zc`
+  fields), while `F55 = 1/S12**2` was a real formula bug — the 1-3
+  shear coefficient should use the 1-3 shear strength (Voigt index 4
+  in the project's `[xx, yy, zz, yz, xz, xy]` convention), not the
+  in-plane shear strength. This deviated from Tsai & Wu (1971) and
+  produced incorrect failure indices whenever a 3D stress state had
+  non-trivial sigma_zz, tau_yz or tau_xz components — e.g. `fe3d` TAI
+  on a damaged panel where the through-thickness coupling is broken.
+
+  `OrthotropicMaterial` gains three optional fields, `Zt`, `Zc`, `S13`,
+  and three corresponding `*_resolved` properties that fall back to
+  `Yt` / `Yc` / `S12` when the user has not provided through-thickness
+  test data (the standard transverse-isotropy assumption for
+  unidirectional CFRP). The four library presets keep their existing
+  in-plane values, so default behaviour is numerically backward-
+  compatible — the formula reduces to the prior code and existing
+  Tsai-Wu tests pass unchanged. Users with measured through-thickness
+  strengths can now override per-material; three new tests in
+  `tests/failure/test_tsai_wu.py` cover the default-fallback,
+  Zt-override, and S13-override paths.
+
 - **fe3d buckling silent fallbacks now surfaced via `AnalysisResults.notes`.**
   Previously, `fe3d_cai_buckling()` returned `(sigma_pristine_MPa, 0.0)` when
   the eigensolver found no positive eigenvalue or raised an exception, and
