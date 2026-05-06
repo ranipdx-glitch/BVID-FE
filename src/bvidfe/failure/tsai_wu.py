@@ -53,7 +53,34 @@ def _tsai_wu_coefficients(m: OrthotropicMaterial):
 
 
 def tsai_wu_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
-    """Return the Tsai-Wu failure index F_i s_i + F_ij s_i s_j."""
+    """Return the Tsai-Wu (1971) failure index for a Voigt-6 stress state.
+
+    Computes the bilinear-and-quadratic invariant
+        index = F_i * sigma_i + F_ij * sigma_i * sigma_j
+    using the linear (F) and quadratic (Q) coefficient arrays from
+    ``_tsai_wu_coefficients``. Failure is predicted when the index reaches
+    1; values above 1 are the fraction-of-overload (margin to failure).
+    The Voigt convention is the project-wide
+    ``[sigma_xx, sigma_yy, sigma_zz, tau_yz, tau_xz, tau_xy]`` (i.e. F44
+    couples to the 2-3 shear, F55 to the 1-3 shear, F66 to the in-plane
+    shear); through-thickness strengths come from
+    ``OrthotropicMaterial.Zt_resolved`` / ``Zc_resolved`` / ``S13_resolved``
+    so the formula reduces to the plane-stress form when those fields are
+    not supplied.
+
+    Parameters
+    ----------
+    m : OrthotropicMaterial
+        Material card with Xt/Xc/Yt/Yc/S12/S23 (mandatory) and optional
+        Zt/Zc/S13 (transverse-isotropy fallback applies otherwise).
+    stress : sequence of 6 floats
+        Voigt-6 stress vector in the material frame; see convention above.
+
+    Returns
+    -------
+    float
+        Dimensionless failure index. >= 1 means failure.
+    """
     F, Q = _tsai_wu_coefficients(m)
     linear = sum(F[i] * stress[i] for i in range(6))
     quad = sum(Q[i][j] * stress[i] * stress[j] for i in range(6) for j in range(6))

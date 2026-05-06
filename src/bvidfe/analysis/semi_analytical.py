@@ -54,11 +54,50 @@ def sublaminate_buckling_load(
     ellipse: DelaminationEllipse,
     boundary: str = "simply_supported",
 ) -> float:
-    """Critical buckling force per unit width (N/mm) for the sublaminate above
-    the given ellipse's interface, modeled as a rectangle with semi-axes =
-    ellipse major/minor. Applies a boundary-dependent multiplier (see module
-    constants) so that the panel's edge condition influences the sublaminate
-    buckling prediction.
+    """Critical buckling force per unit width N_cr (N/mm) for the sublaminate
+    above the given delamination interface.
+
+    The delaminated sublaminate is approximated as an orthotropic
+    simply-supported rectangle with semi-axes equal to the ellipse's major
+    and minor axes (the enclosing-rectangle simplification). Under uniaxial
+    compression along x, the closed-form Rayleigh-Ritz solution with a
+    sine-basis trial function (Timoshenko & Gere §9.2; Reddy *Theory and
+    Analysis of Elastic Plates*, Eq. 4.4.4) is
+
+        N_cr(m, n) = (pi^2 / a^2)
+                     * [D11 * m^4 + 2*(D12 + 2*D66)*(m*a/b)^2 * n^2
+                        + D22 * (a*n/b)^4]
+                     / m^2
+
+    where (a, b) are the rectangle semi-axes, (m, n) are the integer half-
+    wave numbers along x and y, and the D_ij are the sublaminate's CLT
+    bending stiffnesses. We minimise over (m, n) in [1..5] x [1..5]; the
+    range is bounded by the typical 1-3 mode of practical delaminations
+    plus a safety margin.
+
+    The selected sublaminate is the *thinner* of the "above" and "below"
+    stacks at the interface (it buckles first), and a boundary-dependent
+    multiplier is applied so the parent panel's edge condition transmits
+    appropriate lateral restraint to the sublaminate (clamped: 1.9x,
+    free: 0.5x, simply-supported: 1.0x).
+
+    Parameters
+    ----------
+    lam : Laminate
+        Full panel laminate; supplies material, layup, and ply thickness.
+    ellipse : DelaminationEllipse
+        Delamination at which the sublaminate forms. Its
+        ``interface_index`` selects the sublaminate thickness; ``major_mm``
+        and ``minor_mm`` are the rectangle semi-axes.
+    boundary : str
+        One of ``"simply_supported"``, ``"clamped"``, ``"free"``.
+
+    Returns
+    -------
+    float
+        Critical buckling force per unit sublaminate width N_cr in N/mm,
+        already multiplied by the boundary factor. Returns ``inf`` when the
+        sublaminate is degenerate (zero plies, zero ellipse area).
     """
     i = ellipse.interface_index
     full_layup = lam.layup_deg

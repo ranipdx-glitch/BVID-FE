@@ -186,7 +186,36 @@ def _k_contact_hertz_linearized(lam: Laminate, imp: ImpactorGeometry, P: float) 
 
 
 def threshold_load(lam: Laminate, pan: PanelGeometry, imp: ImpactorGeometry) -> float:
-    """Olsson damage-threshold load Pc (N). Uses geometric-mean flexural rigidity D_eff."""
+    """Olsson quasi-static damage-threshold load Pc (Newtons).
+
+    Closed-form prediction from Olsson (2001) "Analytical prediction of large
+    mass impact damage in composite laminates", *Composites Part A* 32(9):
+
+        Pc = pi * sqrt(8 * G_IIc * D_eff / 9)
+
+    where ``G_IIc`` is the mode-II interlaminar fracture toughness (N/mm,
+    from the material card) and ``D_eff = sqrt(D11 * D22)`` is the
+    geometric-mean flexural rigidity of the laminate (N*mm). The formula is
+    derived from a plate-bending energy balance at the onset of through-
+    thickness shear delamination and is independent of the panel size and
+    impactor shape — only the laminate stack matters. Boundary-condition
+    and shape effects enter the *onset energy* via ``onset_energy``, not
+    here.
+
+    Parameters
+    ----------
+    lam : Laminate
+        Laminate carrying the material card and CLT D matrix.
+    pan : PanelGeometry
+        Accepted for API symmetry with `onset_energy`; not used.
+    imp : ImpactorGeometry
+        Accepted for API symmetry with `onset_energy`; not used.
+
+    Returns
+    -------
+    float
+        Threshold load Pc in Newtons. Always positive.
+    """
     D_eff = lam.flexural_rigidity_Deff()  # N*mm
     G_IIc = lam.material.G_IIc  # N/mm
     return math.pi * math.sqrt(8 * G_IIc * D_eff / 9.0)

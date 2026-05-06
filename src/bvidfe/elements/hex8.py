@@ -200,18 +200,48 @@ class Hex8Element:
         return out
 
     def geometric_stiffness_matrix(self, sigma_bar_3x3: np.ndarray) -> np.ndarray:
-        """Element geometric stiffness for a constant stress state.
+        """Element geometric (initial-stress) stiffness for a constant pre-stress.
 
-        sigma_bar_3x3 : (3, 3) symmetric stress matrix in the global frame.
+        For a body in equilibrium under a static stress state ``sigma_bar``,
+        the second-order strain perturbation associated with an infinitesimal
+        displacement increment ``u`` is the nonlinear Lagrangian term
+        ``eps_nl = 1/2 * grad(u)^T @ grad(u)``. Its variation contributes a
+        geometric stiffness to the linearised buckling eigenproblem
+        ``(K + lambda * K_g) phi = 0``:
 
-        Returns 24x24 geometric stiffness K_g. K_g is symmetric and proportional
-        to the applied stress state. Used for linear buckling eigenproblems.
+            K_g = integral_V grad(N)^T @ sigma_bar @ grad(N) dV
 
-        Derivation: for a nonlinear strain perturbation eps_nl = 0.5 grad(u).T grad(u),
-        the contribution to the stiffness from the pre-stress state sigma is
-            K_g = integral_V grad(N).T @ sigma @ grad(N) dV
-        where grad(N) is the 3x8 matrix of nodal shape function spatial gradients.
-        In Kronecker form, K_g (24x24) = kron(H_3x3_per_node_pair, I_3).
+        where ``grad(N)`` is the 3x8 matrix of nodal shape-function spatial
+        gradients (i.e. ``J_inv @ dN_natural`` at each Gauss point). Each
+        node-pair (i, j) contribution is the scalar ``H_ij = grad(N_i)^T @
+        sigma_bar @ grad(N_j)``, expanded to the 3x3 nodal DOF block as
+        ``H_ij * I_3``. In Kronecker form, ``K_g (24x24) = kron(H, I_3)``,
+        which is what this routine assembles via 2x2x2 Gauss quadrature.
+        ``K_g`` is symmetric, linear in ``sigma_bar``, and may be indefinite.
+
+        References: Cook §17.7, Bathe §6.8.
+
+        Parameters
+        ----------
+        sigma_bar_3x3 : np.ndarray
+            (3, 3) symmetric Cauchy stress in the global frame, in MPa
+            (consistent units with the elastic K). Typically a uniform
+            uniaxial pre-stress for plate-buckling problems.
+
+        Returns
+        -------
+        np.ndarray
+            24x24 element geometric stiffness K_g (units MPa * mm^3 = N*mm),
+            symmetric. The eigenvalue ``lambda`` of the generalised
+            eigenproblem ``K phi = lambda K_g phi`` is the buckling load
+            multiplier on ``sigma_bar``.
+
+        Raises
+        ------
+        ValueError
+            If ``sigma_bar_3x3`` is not (3, 3).
+        DegenerateElementError
+            If any Gauss point has non-positive Jacobian determinant.
         """
         sigma_bar = np.asarray(sigma_bar_3x3, dtype=float)
         if sigma_bar.shape != (3, 3):

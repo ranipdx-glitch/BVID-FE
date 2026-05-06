@@ -25,6 +25,46 @@ In-progress work toward v0.2.0. No tag yet.
 
 ### Added
 
+- **`tests/validation/` directory with five new analytical-reference tests.**
+  Five new files lock the public formulas to known closed-form values so
+  silent drift in the physics surfaces immediately:
+  - ``test_clt_abd_reference.py`` — pinned ``A``, ``B``, ``D`` matrices for a
+    ``[0/90]_s`` IM7/8552 laminate; symmetric layup → ``B == 0``; balanced
+    layup → ``A_16 == A_26 == 0``.
+  - ``test_olsson_threshold_reference.py`` — Olsson-2001 threshold-load
+    shape relationships (``Pc / sqrt(D_eff * G_IIc) = pi*sqrt(8/9)``,
+    panel-size invariance, ``Pc ~ h^{3/2}`` thickness scaling).
+  - ``test_soutis_cai_reference.py`` — Soutis CAI knockdown self-
+    consistency: zero-DPA short-circuit, dimensionless invariance under
+    ``DPA / A_panel`` scaling, monotonicity, ``k_s`` calibration response.
+  - ``test_whitney_nuismer_limits.py`` — Whitney-Nuismer TAI analytical
+    limits: ``DPA → 0`` knockdown → 1.0; ``DPA → ∞`` knockdown → ``1 /
+    Kt_inf`` (= 1/3 for Kt_inf = 3); monotone-decreasing in DPA;
+    bounded-below by the asymptote.
+  - ``test_fe3d_pristine_clt_consistency.py`` — pristine fe3d uniaxial
+    extension recovers ``E_x = A11 / h`` (CLT) within 10% on a coarse
+    ``20 × 10 mm × 4-ply`` mesh; pristine input produces no damaged
+    elements; zero-load solve returns zero displacement.
+
+- **Docstring upgrades on five high-traffic public symbols.**
+  ``larc05_index``, ``tsai_wu_index``, ``olsson.threshold_load``,
+  ``hex8.geometric_stiffness_matrix``, and
+  ``semi_analytical.sublaminate_buckling_load`` previously had one-line
+  docstrings that hid the underlying physics. Each now documents the
+  formula, references (LaRC05 NASA/TM, Olsson 2001, Cook §17.7 / Bathe
+  §6.8, Timoshenko & Gere §9.2), Voigt-index conventions, units, return-
+  value semantics, and any raise-conditions — so ``help()`` and IDE
+  tooltips show the same context that's currently spread across the
+  README and ARCHITECTURE.
+
+- **GUI panel-geometry helper deduplicated.** ``BvidMainWindow`` had
+  three sites constructing the same ``PanelGeometry(Lx_mm, Ly_mm,
+  boundary)`` from the panel-input panel (one of which was already
+  exposed as ``panel_panel_as_geometry`` but unused). The two callers
+  in ``_update_live_onset`` and ``_build_config`` now use the helper;
+  the now-unused ``PanelGeometry`` import is dropped from
+  ``_update_live_onset``. No behaviour change.
+
 - **Repo hygiene: dependency caps, headless requirements.txt, top-level
   conftest, Dependabot.** Four small infrastructure changes that
   collectively make the project safer to install and easier to keep up:

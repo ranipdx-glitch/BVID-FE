@@ -168,7 +168,6 @@ class BvidMainWindow(QMainWindow):
             return
         try:
             import warnings
-            from bvidfe.core.geometry import PanelGeometry
             from bvidfe.core.laminate import Laminate
             from bvidfe.core.material import MATERIAL_LIBRARY
             from bvidfe.impact.mapping import impact_to_damage
@@ -181,11 +180,7 @@ class BvidMainWindow(QMainWindow):
                 self.material_panel.get_layup_deg(),
                 self.material_panel.get_ply_thickness_mm(),
             )
-            panel = PanelGeometry(
-                Lx_mm=self.panel_panel.get_Lx_mm(),
-                Ly_mm=self.panel_panel.get_Ly_mm(),
-                boundary=self.panel_panel.get_boundary(),
-            )
+            panel = self.panel_panel_as_geometry()
             event = self.impact_panel.get_impact_event()
             with warnings.catch_warnings():
                 # Suppress the "free" boundary / small-mass / DPA-cap
@@ -208,13 +203,8 @@ class BvidMainWindow(QMainWindow):
     def _build_config(self):
         """Assemble an AnalysisConfig from current panel state."""
         from bvidfe.analysis import AnalysisConfig, MeshParams
-        from bvidfe.core.geometry import PanelGeometry
 
-        panel = PanelGeometry(
-            Lx_mm=self.panel_panel.get_Lx_mm(),
-            Ly_mm=self.panel_panel.get_Ly_mm(),
-            boundary=self.panel_panel.get_boundary(),
-        )
+        panel = self.panel_panel_as_geometry()
         mode = self.input_mode_panel.current_mode()
         impact = self.impact_panel.get_impact_event() if mode == "impact" else None
         damage = self.damage_panel.get_damage_state() if mode == "damage" else None
