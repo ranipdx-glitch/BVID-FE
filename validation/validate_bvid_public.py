@@ -23,6 +23,18 @@ from bvidfe.impact.mapping import ImpactEvent
 
 DATASET_DIR = Path(__file__).parent / "datasets"
 
+# Per-tier slack on the dataset's target_mae_pct. ``empirical`` and
+# ``semi_analytical`` are calibrated closed-form models; ``fe3d`` is the
+# stress-field tool whose absolute-strength prediction has known caveats
+# (energy-flatness, simplified buckling BCs) — see CHANGELOG. The looser
+# fe3d gate keeps CI from flapping on regressions that are still inside
+# the documented model uncertainty.
+_TIER_GATE_MULTIPLIER = {
+    "empirical": 1.25,
+    "semi_analytical": 1.25,
+    "fe3d": 2.0,
+}
+
 
 @dataclass
 class DatasetCase:
@@ -131,7 +143,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--gate",
         action="store_true",
-        help="Exit non-zero if MAE exceeds 1.25 * dataset target_mae_pct",
+        help="Exit non-zero if MAE exceeds the tier-specific multiplier "
+        "of the dataset target_mae_pct (1.25 for empirical / "
+        "semi_analytical, 2.0 for fe3d).",
+    )
+    parser.add_argument(
+        "--max-cases",
+        type=int,
+        default=None,
+        help="If set, run only the first N cases of each dataset. Useful for "
+        "the fe3d CI step where the full dataset would push CI runtime "
+        "past 60 s.",
     )
     args = parser.parse_args(argv)
 
@@ -143,18 +165,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     any_gate_fail = False
+    multiplier = _TIER_GATE_MULTIPLIER.get(args.tier, 1.25)
     for path in paths:
         name, cases, meta = load_dataset(path)
+        if args.max_cases is not None:
+            cases = cases[: args.max_cases]
         df = run_dataset(cases, tier=args.tier)
         mae = float(df["error_pct"].mean())
         max_err = float(df["error_pct"].max())
         target = meta["target_mae_pct"]
         print(f"\n=== {name} ({args.tier}) — {len(cases)} cases ===")
         print(df.to_string(index=False))
-        print(f"MAE = {mae:.2f}%   max error = {max_err:.2f}%   target = {target:.1f}%")
-        if args.gate and mae > 1.25 * target:
+        print(
+            f"MAE = {mae:.2f}%   max error = {max_err:.2f}%   "
+            f"target = {target:.1f}%   gate-multiplier = {multiplier:g}"
+        )
+        if args.gate and mae > multiplier * target:
             print(
-                f"FAIL: {name} MAE {mae:.2f}% exceeds 1.25 * {target:.1f}% target",
+                f"FAIL: {name} ({args.tier}) MAE {mae:.2f}% exceeds "
+                f"{multiplier:g} * {target:.1f}% target",
                 file=sys.stderr,
             )
             any_gate_fail = True

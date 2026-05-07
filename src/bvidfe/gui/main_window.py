@@ -76,6 +76,7 @@ class BvidMainWindow(QMainWindow):
         # Keep a reference to workers to prevent garbage-collection during run
         self._analysis_worker: AnalysisWorker | None = None
         self._sweep_worker: SweepWorker | None = None
+        self._tier_compare_worker = None  # type: ignore[assignment]  # TierComparisonWorker
         self.analysis_panel.runRequested.connect(self._run_analysis)
         self.sweep_panel.sweepRequested.connect(self._run_sweep)
 
@@ -167,7 +168,6 @@ class BvidMainWindow(QMainWindow):
             return
         try:
             import warnings
-            from bvidfe.core.geometry import PanelGeometry
             from bvidfe.core.laminate import Laminate
             from bvidfe.core.material import MATERIAL_LIBRARY
             from bvidfe.impact.mapping import impact_to_damage
@@ -180,11 +180,7 @@ class BvidMainWindow(QMainWindow):
                 self.material_panel.get_layup_deg(),
                 self.material_panel.get_ply_thickness_mm(),
             )
-            panel = PanelGeometry(
-                Lx_mm=self.panel_panel.get_Lx_mm(),
-                Ly_mm=self.panel_panel.get_Ly_mm(),
-                boundary=self.panel_panel.get_boundary(),
-            )
+            panel = self.panel_panel_as_geometry()
             event = self.impact_panel.get_impact_event()
             with warnings.catch_warnings():
                 # Suppress the "free" boundary / small-mass / DPA-cap
@@ -207,16 +203,19 @@ class BvidMainWindow(QMainWindow):
     def _build_config(self):
         """Assemble an AnalysisConfig from current panel state."""
         from bvidfe.analysis import AnalysisConfig, MeshParams
-        from bvidfe.core.geometry import PanelGeometry
 
-        panel = PanelGeometry(
-            Lx_mm=self.panel_panel.get_Lx_mm(),
-            Ly_mm=self.panel_panel.get_Ly_mm(),
-            boundary=self.panel_panel.get_boundary(),
-        )
+        panel = self.panel_panel_as_geometry()
         mode = self.input_mode_panel.current_mode()
         impact = self.impact_panel.get_impact_event() if mode == "impact" else None
         damage = self.damage_panel.get_damage_state() if mode == "damage" else None
+        if mode == "damage":
+            skipped = getattr(self.damage_panel, "skipped_rows", [])
+            if skipped:
+                rows = ", ".join(str(r) for r, _ in skipped)
+                self.statusBar().showMessage(
+                    f"Damage panel: skipped {len(skipped)} malformed row(s): {rows}",
+                    8000,
+                )
         mesh_params = None
         if self.analysis_panel.get_tier() == "fe3d":
             mesh_params = MeshParams(
@@ -564,14 +563,19 @@ class BvidMainWindow(QMainWindow):
         menu.addAction(compare_tiers)
 
     def _compare_tiers(self) -> None:
-        """Run empirical + semi_analytical sweeps on the current config and
-        overlay them on the Knockdown Curve tab.
+        """Run empirical + semi_analytical sweeps on the current config in a
+        background ``TierComparisonWorker`` and overlay them on the Knockdown
+        Curve tab when the worker finishes.
 
         Both tiers are fast (sub-second for empirical; ~1 second for
-        semi_analytical). fe3d is skipped because a sweep at fe3d can
-        take many minutes. Users who want fe3d in the comparison can
+        semi_analytical) but on the GUI thread the combined ~12 s sweep
+        froze the UI completely. fe3d is skipped because a sweep at fe3d
+        can take many minutes; users who want fe3d in the comparison can
         trigger a dedicated sweep via the Sweep panel.
         """
+        if self._tier_compare_worker is not None:
+            self.statusBar().showMessage("Tier comparison already running\u2026", 3000)
+            return
         try:
             cfg = self._build_config()
         except (ValueError, AssertionError) as exc:
@@ -581,34 +585,50 @@ class BvidMainWindow(QMainWindow):
             self.statusBar().showMessage("Tier comparison requires an impact-driven config.", 5000)
             return
 
-        from dataclasses import replace
-
         import numpy as np
 
-        from bvidfe.analysis import BvidAnalysis
+        from bvidfe.gui.workers import TierComparisonWorker
 
-        self.statusBar().showMessage("Running tier comparison\u2026")
         e_cur = cfg.impact.energy_J
         energies = list(np.linspace(2.0, max(5.0, 1.5 * e_cur), 8))
+        tiers = ("empirical", "semi_analytical")
 
-        kd_by_tier: dict[str, list[float]] = {}
-        for tier in ("empirical", "semi_analytical"):
-            kd = []
-            for E in energies:
-                new_impact = replace(cfg.impact, energy_J=float(E))
-                run_cfg = replace(cfg, impact=new_impact, tier=tier, mesh=None)
-                try:
-                    result = BvidAnalysis(run_cfg).run()
-                    kd.append(result.knockdown)
-                except Exception:  # noqa: BLE001
-                    kd.append(float("nan"))
-            kd_by_tier[tier] = kd
+        self.statusBar().showMessage("Running tier comparison\u2026")
+        worker = TierComparisonWorker(cfg, tiers, energies)
+        worker.resultReady.connect(self._on_tier_compare_ready)
+        worker.error.connect(self._on_worker_error)
+        worker.progress.connect(self._on_progress)
+        worker.finished.connect(lambda w=worker: self._on_tier_compare_finished(w))
+        self._tier_compare_worker = worker
+        worker.start()
 
+    def _on_tier_compare_ready(self, payload) -> None:
+        """Push the worker result into the Knockdown Curve tab and report
+        any per-(tier, energy) failures via the status bar."""
+        energies, kd_by_tier, failed_pairs = payload
         self.knockdown_tab.update_tier_comparison(energies, kd_by_tier)
-        self.statusBar().showMessage(
-            f"Tier comparison complete: {len(energies)} energies x " f"{len(kd_by_tier)} tiers",
-            8000,
-        )
+        if failed_pairs:
+            self.statusBar().showMessage(
+                f"Tier comparison complete: {len(energies)} energies x "
+                f"{len(kd_by_tier)} tiers ({len(failed_pairs)} pair(s) skipped \u2014 see log)",
+                10000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Tier comparison complete: {len(energies)} energies x "
+                f"{len(kd_by_tier)} tiers",
+                8000,
+            )
+
+    def _on_tier_compare_finished(self, worker) -> None:
+        """Cleanup when a TierComparisonWorker finishes; mirrors the
+        AnalysisWorker / SweepWorker variants."""
+        try:
+            worker.deleteLater()
+        except RuntimeError:
+            pass
+        if self._tier_compare_worker is worker:
+            self._tier_compare_worker = None
 
     def _save_config(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(
@@ -628,11 +648,38 @@ class BvidMainWindow(QMainWindow):
         path_str, _ = QFileDialog.getOpenFileName(self, "Load AnalysisConfig", "", "JSON (*.json)")
         if not path_str:
             return
+        # Read + parse + apply in three explicit steps so each failure mode
+        # surfaces a specific message instead of the bare "list index out of
+        # range" string the previous catch-all displayed.
         try:
-            d = json.loads(Path(path_str).read_text())
+            text = Path(path_str).read_text()
+        except OSError as exc:
+            QMessageBox.warning(self, "Cannot read config", f"{path_str}: {exc}")
+            return
+        try:
+            d = json.loads(text)
+        except json.JSONDecodeError as exc:
+            QMessageBox.warning(
+                self,
+                "Malformed JSON",
+                f"{path_str} is not valid JSON: {exc.msg} (line {exc.lineno}, col {exc.colno}).",
+            )
+            return
+        try:
             cfg = config_from_dict(d)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Failed to load", str(exc))
+        except KeyError as exc:
+            QMessageBox.warning(
+                self,
+                "Missing field",
+                f"Config is missing required field: {exc}.",
+            )
+            return
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Invalid value",
+                f"Config has an invalid value: {exc}.",
+            )
             return
         self._apply_config_to_panels(cfg)
         self.statusBar().showMessage(f"Loaded config from {path_str}", 5000)

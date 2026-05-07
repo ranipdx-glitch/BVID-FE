@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 from bvidfe.elements.gauss import gauss_points_hex
-from bvidfe.elements.hex8 import Hex8Element
+from bvidfe.elements.hex8 import Hex8Element, _validate_jacobian
 
 
 class Hex8iElement(Hex8Element):
@@ -71,6 +71,7 @@ class Hex8iElement(Hex8Element):
 
         # Reference Jacobian at center for patch-test consistency
         J0 = self.jacobian(0.0, 0.0, 0.0)
+        _validate_jacobian(np.linalg.det(J0), 0.0, 0.0, 0.0, self.node_coords)
         J0_inv = np.linalg.inv(J0)
 
         Kuu = np.zeros((24, 24))

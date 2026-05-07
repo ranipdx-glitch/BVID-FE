@@ -77,11 +77,41 @@ result = BvidAnalysis(config).run()
 
 ## Tier choice
 
-| tier | Runtime | Good for |
-|---|---|---|
-| `empirical` | < 1 s | Design allowables, energy sweeps, quick screening. Soutis formula scales with DPA. |
-| `semi_analytical` | ~ 1 s | More conservative for large-delamination buckling. Rayleigh-Ritz scales with ellipse size. |
-| `fe3d` | ~ 10 s | Stress-field context, damage-through-thickness. **Not recommended for energy sweeps** — knockdown is approximately flat vs. energy on this release's simplified model. |
+| tier | Runtime | Knockdown trustworthy? | Good for |
+|---|---|---|---|
+| `empirical` | < 1 s | Yes — closed-form Soutis (CAI) / Whitney-Nuismer (TAI) | Design allowables, energy sweeps, quick screening. Soutis scales with DPA. |
+| `semi_analytical` | ~ 1 s | Yes for buckling-driven cases; identical to `empirical` for TAI | More conservative for large-delamination buckling. Rayleigh-Ritz scales with ellipse size. |
+| `fe3d` | ~ 10 s | **Qualitative only in v0.2.0** — see note below | Stress-field context, damage-through-thickness. **Not recommended for energy sweeps** — knockdown is approximately flat vs. energy on this release's simplified model. |
+
+## Knockdown semantics
+
+`AnalysisResults.knockdown == residual_strength_MPa / pristine_strength_MPa`.
+The pristine strength is a thickness-weighted ply-average of the lamina-level
+material strengths and is **identical for all three tiers** — only the
+residual-strength numerator differs:
+
+- `empirical`: Soutis (CAI) / Whitney-Nuismer (TAI) closed-form.
+- `semi_analytical`: `min(Soutis, sublaminate buckling)` for CAI; delegates
+  to Whitney-Nuismer for TAI (so its TAI knockdown is mathematically
+  identical to `empirical`).
+- `fe3d`: `min(linear-buckling eigenvalue × σ_ref, first-ply-failure)`,
+  capped at the pristine reference. If the buckling eigensolve finds no
+  positive eigenvalue, or the result is below 5% of pristine, the buckling
+  branch is silently dropped — which means an `fe3d` knockdown of 1.0 can
+  reflect an unconverged buckling solve rather than zero damage effect.
+
+Cross-tier expectations:
+
+- For **CAI**, `semi_analytical.knockdown ≤ empirical.knockdown` always
+  (the buckling floor only lowers the residual). `fe3d` is independent
+  and not energy-monotonic in v0.2.0.
+- For **TAI**, `empirical.knockdown == semi_analytical.knockdown` exactly;
+  `fe3d` differs.
+- All three are on the same scale and qualitatively comparable, but
+  numerical agreement is not guaranteed.
+
+See README → "Knockdown definition and cross-tier comparability" for the
+full breakdown and limitation cross-links.
 
 ## Parametric sweeps
 

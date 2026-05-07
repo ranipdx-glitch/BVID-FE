@@ -8,8 +8,8 @@ from typing import Literal
 import numpy as np
 
 from bvidfe.core.material import OrthotropicMaterial
-from bvidfe.failure.larc05 import larc05_index
-from bvidfe.failure.tsai_wu import tsai_wu_index
+from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
+from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 
 CriterionName = Literal["tsai_wu", "larc05"]
 
@@ -38,22 +38,25 @@ class FailureEvaluator:
             return tsai_wu_index(self.material, stress)
         return larc05_index(self.material, stress)
 
+    def _index_batch(self, stresses: np.ndarray) -> np.ndarray:
+        if self.criterion == "tsai_wu":
+            return tsai_wu_index_batch(self.material, stresses)
+        return larc05_index_batch(self.material, stresses)
+
     def evaluate(self, stress_field: np.ndarray) -> LaminateFailureReport:
-        """stress_field shape (n_elem, n_gp, 6) in the material frame."""
+        """Return the highest failure index across an (n_elem, n_gp, 6) field.
+
+        Vectorised: a single ``_index_batch`` call replaces the prior nested
+        Python loop. Numerical equivalence to the scalar form is locked by
+        ``tests/failure/test_evaluator.py::test_evaluate_matches_scalar_loop``.
+        """
         assert stress_field.ndim == 3 and stress_field.shape[2] == 6
-        max_idx = -1.0
-        crit_e = 0
-        crit_g = 0
-        for e in range(stress_field.shape[0]):
-            for g in range(stress_field.shape[1]):
-                idx = self._index(stress_field[e, g])
-                if idx > max_idx:
-                    max_idx = idx
-                    crit_e = e
-                    crit_g = g
+        idx_grid = self._index_batch(stress_field)  # shape (n_elem, n_gp)
+        flat_argmax = int(np.argmax(idx_grid))
+        crit_e, crit_g = np.unravel_index(flat_argmax, idx_grid.shape)
         return LaminateFailureReport(
-            max_index=max_idx,
-            critical_element=crit_e,
-            critical_gauss_point=crit_g,
+            max_index=float(idx_grid[crit_e, crit_g]),
+            critical_element=int(crit_e),
+            critical_gauss_point=int(crit_g),
             criterion=self.criterion,
         )

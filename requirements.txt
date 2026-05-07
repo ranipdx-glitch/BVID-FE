@@ -1,8 +1,19 @@
-numpy>=1.24
-scipy>=1.10
-matplotlib>=3.7
-shapely>=2.0
-pandas>=2.0
-PyQt6>=6.5
-pyvista>=0.42
-pyvistaqt>=0.11
+# Pinned runtime dependencies for the bvidfe library + CLI.
+#
+# Only packages that src/bvidfe/ actually imports at runtime; PyQt6 and
+# pyvista (GUI), and pytest / ruff / black / pytest-qt (dev tools) live
+# in the optional-extras of pyproject.toml and are not duplicated here.
+#
+# Install GUI-bundled or dev-bundled environments via the extras instead:
+#   pip install -e ".[gui]"        # GUI only
+#   pip install -e ".[dev]"        # dev tools
+#   pip install -e ".[all]"        # everything
+#
+# Versions below are the late-2024 stable releases that fall inside
+# pyproject.toml's existing >= / < bounds. Re-pin from `pip freeze` in
+# the validated build environment if you ship a different combination.
+numpy==2.1.3
+scipy==1.14.1
+matplotlib==3.9.3
+shapely==2.0.6
+pandas==2.2.3

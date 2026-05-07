@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 
 from bvidfe.core.material import MATERIAL_LIBRARY
-from bvidfe.elements.hex8 import Hex8Element
+from bvidfe.elements.hex8 import DegenerateElementError, Hex8Element
 
 
 def _unit_cube_nodes():
@@ -85,3 +86,45 @@ def test_ply_rotation_produces_stiffness_in_laminate_frame():
     K0 = elem0.stiffness_matrix()
     K90 = elem90.stiffness_matrix()
     assert not np.allclose(K0, K90, atol=1.0)
+
+
+def test_inverted_hex_raises_degenerate_element_error():
+    """A hex with reversed top/bottom face has det(J) < 0 — the integration
+    would silently produce negative volume and corrupted stiffness without the
+    Jacobian guard."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    nodes = _unit_cube_nodes().copy()
+    # Swap the top and bottom face — det(J) flips sign
+    nodes[[0, 1, 2, 3, 4, 5, 6, 7]] = nodes[[4, 5, 6, 7, 0, 1, 2, 3]]
+    elem = Hex8Element(nodes, m)
+    with pytest.raises(DegenerateElementError, match="non-positive"):
+        elem.B_matrix(0.0, 0.0, 0.0)
+
+
+def test_singular_hex_raises_degenerate_element_error():
+    """A hex with two coincident nodes is singular: det(J) ≈ 0 → raises."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    nodes = _unit_cube_nodes().copy()
+    # Collapse top face onto bottom (zero-thickness slab)
+    nodes[4:8] = nodes[0:4]
+    elem = Hex8Element(nodes, m)
+    with pytest.raises(DegenerateElementError, match="non-positive"):
+        elem.B_matrix(0.0, 0.0, 0.0)
+
+
+def test_geometric_stiffness_matrix_also_validates_jacobian():
+    """The Kg assembly path goes through its own jacobian/det chain; it must
+    also raise on degenerate elements."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    nodes = _unit_cube_nodes().copy()
+    nodes[4:8] = nodes[0:4]  # collapsed top → singular J
+    elem = Hex8Element(nodes, m)
+    sigma_bar = np.diag([1.0, 0.0, 0.0])
+    with pytest.raises(DegenerateElementError, match="non-positive"):
+        elem.geometric_stiffness_matrix(sigma_bar)
+
+
+def test_degenerate_element_error_is_a_value_error():
+    """Defensive code that catches generic ValueError must still see the new
+    error class — we do not want to break existing exception handlers."""
+    assert issubclass(DegenerateElementError, ValueError)

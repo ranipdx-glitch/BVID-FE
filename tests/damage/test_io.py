@@ -91,3 +91,109 @@ def test_rejects_negative_dent(tmp_path):
     )
     with pytest.raises(CScanSchemaError):
         load_cscan_json(fp)
+
+
+def _valid_payload(**overrides):
+    base = {
+        "schema_version": "1.0",
+        "dent_depth_mm": 0.4,
+        "fiber_break_radius_mm": 1.5,
+        "delaminations": [
+            {
+                "interface_index": 1,
+                "centroid_mm": [10.0, 5.0],
+                "major_mm": 8.0,
+                "minor_mm": 4.0,
+                "orientation_deg": 0.0,
+            }
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_rejects_string_in_numeric_field(tmp_path):
+    """Issue #10: a string passed in dent_depth_mm used to crash the
+    < 0 comparison with a TypeError; it now raises CScanSchemaError."""
+    fp = tmp_path / "bad.json"
+    fp.write_text(json.dumps(_valid_payload(dent_depth_mm="abc")))
+    with pytest.raises(CScanSchemaError, match="dent_depth_mm"):
+        load_cscan_json(fp)
+
+
+def test_rejects_nan_in_numeric_field(tmp_path):
+    """NaN is JSON-encodable via Python's allow_nan=True default; the
+    loader must reject it explicitly so it doesn't reach numpy."""
+    fp = tmp_path / "bad.json"
+    # json.dumps with default allow_nan=True emits 'NaN' as a literal
+    fp.write_text(json.dumps(_valid_payload(dent_depth_mm=float("nan"))))
+    with pytest.raises(CScanSchemaError, match="finite"):
+        load_cscan_json(fp)
+
+
+def test_rejects_inf_in_centroid(tmp_path):
+    """Inf must be rejected for any numeric field, including centroid coords."""
+    payload = _valid_payload()
+    payload["delaminations"][0]["centroid_mm"] = [float("inf"), 5.0]
+    fp = tmp_path / "bad.json"
+    fp.write_text(json.dumps(payload))
+    with pytest.raises(CScanSchemaError, match="finite"):
+        load_cscan_json(fp)
+
+
+def test_rejects_negative_fiber_break_radius(tmp_path):
+    fp = tmp_path / "bad.json"
+    fp.write_text(json.dumps(_valid_payload(fiber_break_radius_mm=-1.5)))
+    with pytest.raises(CScanSchemaError, match="fiber_break_radius_mm"):
+        load_cscan_json(fp)
+
+
+def test_rejects_delamination_that_is_not_an_object(tmp_path):
+    """A bare list or string in the delaminations array used to crash the
+    'k not in d' check; now raises a clear CScanSchemaError."""
+    payload = _valid_payload()
+    payload["delaminations"].append("oops")
+    fp = tmp_path / "bad.json"
+    fp.write_text(json.dumps(payload))
+    with pytest.raises(CScanSchemaError, match="must be an object"):
+        load_cscan_json(fp)
+
+
+def test_unknown_top_level_field_warns_but_loads(tmp_path):
+    """Forward-compat: an unknown top-level field (e.g. a future
+    'panel_id' annotation) emits a UserWarning but does not abort loading."""
+    import warnings as _warnings
+
+    payload = _valid_payload(panel_id="ABC-1234")
+    fp = tmp_path / "ok.json"
+    fp.write_text(json.dumps(payload))
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ds = load_cscan_json(fp)
+    assert ds.dent_depth_mm == 0.4
+    assert any("unknown top-level field" in str(w.message) for w in caught)
+
+
+def test_unknown_delamination_field_warns_but_loads(tmp_path):
+    import warnings as _warnings
+
+    payload = _valid_payload()
+    payload["delaminations"][0]["confidence"] = 0.95
+    fp = tmp_path / "ok.json"
+    fp.write_text(json.dumps(payload))
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ds = load_cscan_json(fp)
+    assert len(ds.delaminations) == 1
+    assert any("unknown field" in str(w.message) for w in caught)
+
+
+def test_rejects_non_int_interface_index(tmp_path):
+    """interface_index must be an int, not a float — silent int(2.5) → 2
+    truncation hides a real schema error."""
+    payload = _valid_payload()
+    payload["delaminations"][0]["interface_index"] = 2.5
+    fp = tmp_path / "bad.json"
+    fp.write_text(json.dumps(payload))
+    with pytest.raises(CScanSchemaError, match="must be an int"):
+        load_cscan_json(fp)

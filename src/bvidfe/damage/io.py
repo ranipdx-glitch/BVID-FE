@@ -6,6 +6,8 @@ Schema: `docs/cscan_schema.md`.
 from __future__ import annotations
 
 import json
+import math
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Union
 
@@ -16,6 +18,14 @@ SCHEMA_VERSION = "1.0"
 
 class CScanSchemaError(ValueError):
     """Raised when a C-scan input does not conform to the BVID-FE schema."""
+
+
+_TOP_LEVEL_KEYS = frozenset(
+    {"schema_version", "dent_depth_mm", "fiber_break_radius_mm", "delaminations"}
+)
+_DELAMINATION_KEYS = frozenset(
+    {"interface_index", "centroid_mm", "major_mm", "minor_mm", "orientation_deg"}
+)
 
 
 def damage_state_to_dict(ds: DamageState) -> Dict[str, Any]:
@@ -36,6 +46,20 @@ def damage_state_to_dict(ds: DamageState) -> Dict[str, Any]:
     }
 
 
+def _require_finite_number(value: Any, label: str) -> float:
+    """Validate ``value`` is a finite real number (rejects str, NaN, Inf)
+    and return it as a float. Raises ``CScanSchemaError`` on every failure
+    mode so callers see a uniform error type."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise CScanSchemaError(
+            f"{label} must be a number (got {type(value).__name__}: {value!r})"
+        )
+    f = float(value)
+    if not math.isfinite(f):
+        raise CScanSchemaError(f"{label} must be finite (got {f})")
+    return f
+
+
 def _validate_dict(data: Dict[str, Any]) -> None:
     if not isinstance(data, dict):
         raise CScanSchemaError("top-level JSON must be an object")
@@ -45,25 +69,67 @@ def _validate_dict(data: Dict[str, Any]) -> None:
         raise CScanSchemaError(
             f"unsupported schema_version {data['schema_version']!r}; expected {SCHEMA_VERSION!r}"
         )
+    # Warn (but accept) on unknown top-level fields so old C-scan files keep
+    # loading after we add new optional fields, but typos in known fields
+    # ("dent_dept_mm") still get the user's attention.
+    unknown = set(data) - _TOP_LEVEL_KEYS
+    if unknown:
+        warnings.warn(
+            f"C-scan JSON contains unknown top-level field(s): {sorted(unknown)}; "
+            "ignoring",
+            stacklevel=3,
+        )
     if "dent_depth_mm" not in data:
         raise CScanSchemaError("missing required field: dent_depth_mm")
-    if data["dent_depth_mm"] < 0:
-        raise CScanSchemaError(f"dent_depth_mm must be >= 0 (got {data['dent_depth_mm']})")
+    dent = _require_finite_number(data["dent_depth_mm"], "dent_depth_mm")
+    if dent < 0:
+        raise CScanSchemaError(f"dent_depth_mm must be >= 0 (got {dent})")
+    if "fiber_break_radius_mm" in data:
+        fbr = _require_finite_number(data["fiber_break_radius_mm"], "fiber_break_radius_mm")
+        if fbr < 0:
+            raise CScanSchemaError(
+                f"fiber_break_radius_mm must be >= 0 (got {fbr})"
+            )
     if "delaminations" not in data or not isinstance(data["delaminations"], list):
         raise CScanSchemaError("delaminations must be a list")
     for i, d in enumerate(data["delaminations"]):
-        for k in ("interface_index", "centroid_mm", "major_mm", "minor_mm", "orientation_deg"):
+        if not isinstance(d, dict):
+            raise CScanSchemaError(
+                f"delaminations[{i}] must be an object "
+                f"(got {type(d).__name__}: {d!r})"
+            )
+        for k in _DELAMINATION_KEYS:
             if k not in d:
                 raise CScanSchemaError(f"delaminations[{i}] missing field {k!r}")
-        if d["major_mm"] <= 0 or d["minor_mm"] <= 0:
-            raise CScanSchemaError(
-                f"delaminations[{i}] has non-positive axis (major={d['major_mm']}, minor={d['minor_mm']})"
+        unknown_keys = set(d) - _DELAMINATION_KEYS
+        if unknown_keys:
+            warnings.warn(
+                f"delaminations[{i}] contains unknown field(s): "
+                f"{sorted(unknown_keys)}; ignoring",
+                stacklevel=3,
             )
-        if d["interface_index"] < 0:
+        major = _require_finite_number(d["major_mm"], f"delaminations[{i}].major_mm")
+        minor = _require_finite_number(d["minor_mm"], f"delaminations[{i}].minor_mm")
+        if major <= 0 or minor <= 0:
+            raise CScanSchemaError(
+                f"delaminations[{i}] has non-positive axis (major={major}, minor={minor})"
+            )
+        iface = d["interface_index"]
+        if isinstance(iface, bool) or not isinstance(iface, int):
+            raise CScanSchemaError(
+                f"delaminations[{i}].interface_index must be an int "
+                f"(got {type(iface).__name__}: {iface!r})"
+            )
+        if iface < 0:
             raise CScanSchemaError(f"delaminations[{i}].interface_index must be >= 0")
+        _require_finite_number(
+            d["orientation_deg"], f"delaminations[{i}].orientation_deg"
+        )
         c = d["centroid_mm"]
         if not (isinstance(c, (list, tuple)) and len(c) == 2):
             raise CScanSchemaError(f"delaminations[{i}].centroid_mm must be [x, y]")
+        _require_finite_number(c[0], f"delaminations[{i}].centroid_mm[0]")
+        _require_finite_number(c[1], f"delaminations[{i}].centroid_mm[1]")
 
 
 def damage_state_from_dict(data: Dict[str, Any]) -> DamageState:

@@ -19,6 +19,23 @@ class MeshParams:
     in_plane_size_mm: float = 5.0
     cohesive_zone_factor: float = 1.0
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.elements_per_ply, int) or self.elements_per_ply <= 0:
+            raise ValueError(
+                f"MeshParams.elements_per_ply must be a positive int "
+                f"(got {self.elements_per_ply!r})"
+            )
+        if not (self.in_plane_size_mm > 0):
+            raise ValueError(
+                f"MeshParams.in_plane_size_mm must be > 0 "
+                f"(got {self.in_plane_size_mm!r})"
+            )
+        if not (self.cohesive_zone_factor > 0):
+            raise ValueError(
+                f"MeshParams.cohesive_zone_factor must be > 0 "
+                f"(got {self.cohesive_zone_factor!r})"
+            )
+
 
 @dataclass
 class AnalysisConfig:

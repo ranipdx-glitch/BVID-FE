@@ -19,9 +19,14 @@ from bvidfe.impact.mapping import ImpactEvent
 def _parse_panel(spec: str) -> PanelGeometry:
     try:
         a, b = spec.lower().split("x")
-        return PanelGeometry(Lx_mm=float(a), Ly_mm=float(b))
+        Lx, Ly = float(a), float(b)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"--panel must be '<Lx>x<Ly>' (got {spec!r})") from exc
+    if Lx <= 0 or Ly <= 0:
+        raise argparse.ArgumentTypeError(
+            f"--panel dimensions must be positive (got {Lx}x{Ly})"
+        )
+    return PanelGeometry(Lx_mm=Lx, Ly_mm=Ly)
 
 
 def _parse_layup(spec: str) -> List[float]:
@@ -31,6 +36,29 @@ def _parse_layup(spec: str) -> List[float]:
         raise argparse.ArgumentTypeError(
             "--layup must be a comma-separated list of ply angles in degrees"
         ) from exc
+
+
+def _positive_float(spec: str) -> float:
+    """argparse type that rejects non-positive numbers."""
+    try:
+        v = float(spec)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a number (got {spec!r})") from exc
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"must be > 0 (got {v})")
+    return v
+
+
+def _existing_path(spec: str):
+    """argparse type that requires a readable file at the given path."""
+    from pathlib import Path
+
+    p = Path(spec)
+    if not p.exists():
+        raise argparse.ArgumentTypeError(f"file not found: {spec}")
+    if not p.is_file():
+        raise argparse.ArgumentTypeError(f"not a file: {spec}")
+    return p
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -43,13 +71,23 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"bvidfe {bvidfe.__version__}",
     )
-    p.add_argument("--material", help="Material preset name (e.g. IM7/8552)")
+    # Defer the MATERIAL_LIBRARY import + choices population to parser-build
+    # time so --material rejects typos early with the standard argparse
+    # 'invalid choice' message listing the four presets, instead of failing
+    # downstream with a raw KeyError.
+    from bvidfe.core.material import MATERIAL_LIBRARY
+
+    p.add_argument(
+        "--material",
+        choices=sorted(MATERIAL_LIBRARY.keys()),
+        help="Material preset name (e.g. IM7/8552)",
+    )
     p.add_argument(
         "--layup",
         type=_parse_layup,
         help="Comma-separated ply angles in degrees, e.g. 0,45,-45,90",
     )
-    p.add_argument("--thickness", type=float, help="Ply thickness in millimeters")
+    p.add_argument("--thickness", type=_positive_float, help="Ply thickness in millimeters")
     p.add_argument(
         "--panel",
         type=_parse_panel,
@@ -59,27 +97,37 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tier", default="empirical", choices=["empirical", "semi_analytical", "fe3d"])
     p.add_argument(
         "--energy",
-        type=float,
+        type=_positive_float,
         help="Impact energy in Joules (impact-driven workflow). Mutually exclusive with --cscan.",
     )
     p.add_argument(
         "--cscan",
-        type=str,
+        type=_existing_path,
         help="Path to a C-scan JSON file (inspection-driven workflow). "
         "Mutually exclusive with --energy. See docs/cscan_schema.md for the format.",
     )
     p.add_argument(
         "--impactor-diameter",
-        type=float,
+        type=_positive_float,
         default=16.0,
         help="Impactor diameter in mm (default 16.0)",
     )
-    p.add_argument("--mass", type=float, default=5.5, help="Impactor mass in kg (default 5.5)")
+    p.add_argument(
+        "--mass", type=_positive_float, default=5.5, help="Impactor mass in kg (default 5.5)"
+    )
     p.add_argument(
         "--quick",
         action="store_true",
         help="Print only the knockdown scalar (residual / pristine) to stdout instead of the full JSON. "
         "Useful for shell pipelines: e.g. `bvidfe ... --quick | xargs -I {} ...`.",
+    )
+    p.add_argument(
+        "--quick-json",
+        action="store_true",
+        help="Like --quick but emits a single-line JSON object {knockdown, "
+        "residual_strength_MPa, pristine_strength_MPa, tier_used} instead of "
+        "a bare scalar. Recommended for scripted callers that want the "
+        "value plus tier provenance without parsing the full --json output.",
     )
     p.add_argument(
         "--list-materials",
@@ -138,12 +186,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
     else:
-        from pathlib import Path
-
         from bvidfe.damage.io import load_cscan_json
 
-        cscan_path = Path(args.cscan)
-        damage = load_cscan_json(cscan_path)
+        # args.cscan is already a validated Path (see _existing_path).
+        damage = load_cscan_json(args.cscan)
         cfg = AnalysisConfig(
             material=args.material,
             layup_deg=args.layup,
@@ -153,8 +199,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             tier=args.tier,
             damage=damage,
         )
+    if args.quick and args.quick_json:
+        parser.error("--quick and --quick-json are mutually exclusive")
     result = BvidAnalysis(cfg).run()
-    if args.quick:
+    if args.quick_json:
+        json.dump(
+            {
+                "knockdown": result.knockdown,
+                "residual_strength_MPa": result.residual_strength_MPa,
+                "pristine_strength_MPa": result.pristine_strength_MPa,
+                "tier_used": result.tier_used,
+            },
+            sys.stdout,
+        )
+        sys.stdout.write("\n")
+    elif args.quick:
         print(f"{result.knockdown:.6f}")
     else:
         json.dump(result.to_dict(), sys.stdout, indent=2, default=str)

@@ -26,4 +26,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
-      - run: python validation/validate_bvid_public.py --gate
+      - name: "Validation: empirical tier (hard gate)"
+        run: python validation/validate_bvid_public.py --gate
+      - name: "Validation: fe3d tier (monitoring; first 3 cases)"
+        # fe3d takes ~10-12 s per case so we cap at the first 3 to keep
+        # CI under ~45 s. The gate multiplier is 2.0 (vs 1.25 for the
+        # empirical hard gate) to acknowledge fe3d's energy-flatness
+        # caveat — failures here are advisory, not blocking.
+        run: python validation/validate_bvid_public.py --gate --tier=fe3d --max-cases=3
+        continue-on-error: true

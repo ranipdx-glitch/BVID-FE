@@ -1,0 +1,28 @@
+# Dependabot keeps the project's pip + GitHub Actions dependencies fresh
+# without a human having to babysit them. Updates land as PRs against
+# main; if pyproject.toml's upper version caps still permit the new
+# release, the existing test matrix runs and the maintainer can merge.
+#
+# Schedule is weekly on Mondays — frequent enough to catch security
+# advisories, sparse enough that dev review isn't drowned in noise.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"

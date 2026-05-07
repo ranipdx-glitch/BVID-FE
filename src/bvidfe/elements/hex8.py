@@ -15,6 +15,35 @@ import numpy as np
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.elements.gauss import gauss_points_hex
 
+
+class DegenerateElementError(ValueError):
+    """Raised when an element has a non-positive Jacobian determinant.
+
+    Subclassed from ``ValueError`` so that defensive ``except ValueError``
+    handlers still catch it, while letting callers that want to react to
+    this specific failure mode catch it precisely (analogous to
+    ``CScanSchemaError`` in ``bvidfe.damage.io``).
+    """
+
+
+def _validate_jacobian(detJ: float, xi: float, eta: float, zeta: float,
+                       node_coords: np.ndarray) -> None:
+    """Raise DegenerateElementError if the Jacobian determinant is non-positive.
+
+    A non-positive ``detJ`` means the element is either inverted (negative
+    determinant — node ordering wrong, or the element has folded over itself)
+    or singular (zero determinant — two or more nodes coincide). Either case
+    silently produces NaN/Inf in ``np.linalg.inv(J)`` and corrupts every
+    downstream stiffness assembly. Catch it loudly here so users get a
+    reproducible mesh-quality error instead of opaque NaNs in their results.
+    """
+    if detJ <= 0:
+        raise DegenerateElementError(
+            f"Hex8 element Jacobian non-positive: detJ={detJ:.3e} at "
+            f"natural coords (xi, eta, zeta)=({xi:g}, {eta:g}, {zeta:g}). "
+            f"Node coordinates: {node_coords.tolist()}."
+        )
+
 # Node natural coordinates (xi, eta, zeta)
 _NODE_COORDS = np.array(
     [
@@ -118,6 +147,7 @@ class Hex8Element:
         dN_nat = self.shape_derivatives(xi, eta, zeta)  # (3, 8)
         J = self.jacobian(xi, eta, zeta)  # (3, 3)
         detJ = np.linalg.det(J)
+        _validate_jacobian(detJ, xi, eta, zeta, self.node_coords)
         J_inv = np.linalg.inv(J)
         dN_phys = J_inv @ dN_nat  # (3, 8) — d N_k / d x, d y, d z
         Nx = dN_phys[0]  # (8,)
@@ -170,18 +200,48 @@ class Hex8Element:
         return out
 
     def geometric_stiffness_matrix(self, sigma_bar_3x3: np.ndarray) -> np.ndarray:
-        """Element geometric stiffness for a constant stress state.
+        """Element geometric (initial-stress) stiffness for a constant pre-stress.
 
-        sigma_bar_3x3 : (3, 3) symmetric stress matrix in the global frame.
+        For a body in equilibrium under a static stress state ``sigma_bar``,
+        the second-order strain perturbation associated with an infinitesimal
+        displacement increment ``u`` is the nonlinear Lagrangian term
+        ``eps_nl = 1/2 * grad(u)^T @ grad(u)``. Its variation contributes a
+        geometric stiffness to the linearised buckling eigenproblem
+        ``(K + lambda * K_g) phi = 0``:
 
-        Returns 24x24 geometric stiffness K_g. K_g is symmetric and proportional
-        to the applied stress state. Used for linear buckling eigenproblems.
+            K_g = integral_V grad(N)^T @ sigma_bar @ grad(N) dV
 
-        Derivation: for a nonlinear strain perturbation eps_nl = 0.5 grad(u).T grad(u),
-        the contribution to the stiffness from the pre-stress state sigma is
-            K_g = integral_V grad(N).T @ sigma @ grad(N) dV
-        where grad(N) is the 3x8 matrix of nodal shape function spatial gradients.
-        In Kronecker form, K_g (24x24) = kron(H_3x3_per_node_pair, I_3).
+        where ``grad(N)`` is the 3x8 matrix of nodal shape-function spatial
+        gradients (i.e. ``J_inv @ dN_natural`` at each Gauss point). Each
+        node-pair (i, j) contribution is the scalar ``H_ij = grad(N_i)^T @
+        sigma_bar @ grad(N_j)``, expanded to the 3x3 nodal DOF block as
+        ``H_ij * I_3``. In Kronecker form, ``K_g (24x24) = kron(H, I_3)``,
+        which is what this routine assembles via 2x2x2 Gauss quadrature.
+        ``K_g`` is symmetric, linear in ``sigma_bar``, and may be indefinite.
+
+        References: Cook §17.7, Bathe §6.8.
+
+        Parameters
+        ----------
+        sigma_bar_3x3 : np.ndarray
+            (3, 3) symmetric Cauchy stress in the global frame, in MPa
+            (consistent units with the elastic K). Typically a uniform
+            uniaxial pre-stress for plate-buckling problems.
+
+        Returns
+        -------
+        np.ndarray
+            24x24 element geometric stiffness K_g (units MPa * mm^3 = N*mm),
+            symmetric. The eigenvalue ``lambda`` of the generalised
+            eigenproblem ``K phi = lambda K_g phi`` is the buckling load
+            multiplier on ``sigma_bar``.
+
+        Raises
+        ------
+        ValueError
+            If ``sigma_bar_3x3`` is not (3, 3).
+        DegenerateElementError
+            If any Gauss point has non-positive Jacobian determinant.
         """
         sigma_bar = np.asarray(sigma_bar_3x3, dtype=float)
         if sigma_bar.shape != (3, 3):
@@ -195,6 +255,7 @@ class Hex8Element:
             dN_nat = self.shape_derivatives(xi, eta, zeta)  # (3, 8)
             J = self.jacobian(xi, eta, zeta)
             detJ = np.linalg.det(J)
+            _validate_jacobian(detJ, xi, eta, zeta, self.node_coords)
             J_inv = np.linalg.inv(J)
             gradN = J_inv @ dN_nat  # (3, 8) — d N_k/d{x,y,z}
 

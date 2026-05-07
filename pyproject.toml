@@ -11,16 +11,16 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [{name = "Rani Elhajjar"}]
 dependencies = [
-    "numpy>=1.24",
-    "scipy>=1.10",
-    "matplotlib>=3.7",
-    "shapely>=2.0",
-    "pandas>=2.0",
+    "numpy>=1.24,<3",
+    "scipy>=1.10,<2",
+    "matplotlib>=3.7,<4",
+    "shapely>=2.0,<3",
+    "pandas>=2.0,<3",
 ]
 
 [project.optional-dependencies]
-gui = ["PyQt6>=6.5", "pyvista>=0.42", "pyvistaqt>=0.11"]
-dev = ["pytest>=7", "pytest-qt>=4.3", "ruff>=0.5", "black>=24"]
+gui = ["PyQt6>=6.5,<7", "pyvista>=0.42,<1", "pyvistaqt>=0.11,<1"]
+dev = ["pytest>=7,<9", "pytest-qt>=4.3,<5", "ruff>=0.5,<1", "black>=24,<26"]
 all = ["bvidfe[gui,dev]"]
 
 [project.scripts]

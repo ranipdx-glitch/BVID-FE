@@ -74,6 +74,7 @@ class BvidAnalysis:
         )
         damage = self._resolve_damage(lam)
         sigma_0 = _pristine_strength(lam, self.config.loading)
+        notes: list[str] = []
 
         if self.config.tier == "empirical":
             sigma = self._empirical(lam, damage, sigma_0)
@@ -94,9 +95,23 @@ class BvidAnalysis:
                 # it's less than 5% of pristine we treat it as a numerical
                 # artefact and fall back to FPF. A future release will wire
                 # proper in-plane pre-stress BCs into the buckling path.
-                sigma_buckling, lambda_crit = fe3d_cai_buckling(self.config, damage, lam, sigma_0)
+                sigma_buckling, lambda_crit, buckling_notes = fe3d_cai_buckling(
+                    self.config, damage, lam, sigma_0
+                )
+                notes.extend(buckling_notes)
                 sigma_fpf = _fe3d_cai_first_ply_failure(self.config, damage, lam, sigma_0)
                 buckling_plausible = sigma_buckling >= 0.05 * sigma_0
+                if not buckling_plausible and not buckling_notes:
+                    # Buckling solve completed but produced an implausibly small
+                    # result — surface that the FPF path is what the user is
+                    # actually seeing. (If `buckling_notes` is already populated
+                    # the eigensolve reported its own failure; no need to layer
+                    # a second note for the same root cause.)
+                    notes.append(
+                        f"fe3d buckling: result {sigma_buckling:.1f} MPa is below "
+                        f"5% of pristine ({sigma_0:.1f} MPa); discarded as a "
+                        "numerical artefact and used first-ply-failure instead."
+                    )
                 sigma = min(sigma_buckling, sigma_fpf) if buckling_plausible else sigma_fpf
                 buckling_eigs = [lambda_crit] if lambda_crit > 0 else None
             else:
@@ -118,6 +133,7 @@ class BvidAnalysis:
             buckling_eigenvalues=buckling_eigs,
             critical_sublaminate=critical_interface,
             field_results=field_results,
+            notes=notes,
         )
 
     def _resolve_damage(self, lam: Laminate) -> DamageState:

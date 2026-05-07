@@ -20,8 +20,8 @@ from bvidfe.analysis.fe_mesh import FeMesh, build_fe_mesh, estimate_fe_mesh_size
 from bvidfe.core.laminate import Laminate
 from bvidfe.damage.state import DamageState
 from bvidfe.elements.hex8 import Hex8Element
-from bvidfe.failure.larc05 import larc05_index
-from bvidfe.failure.tsai_wu import tsai_wu_index
+from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
+from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 from bvidfe.solver.assembler import assemble_global_stiffness
 from bvidfe.solver.boundary import (
     BoundaryCondition,
@@ -36,11 +36,50 @@ from bvidfe.solver.static import solve_linear_static
 # the GUI from a terminal (or running the CLI / Python API) will see
 # one log line per FE stage, making long runs observable.
 _log = logging.getLogger("bvidfe.fe3d")
+
+
+def _resolve_log_level(default: str = "INFO") -> int:
+    """Resolve BVIDFE_LOG_LEVEL → numeric level, falling back to ``default``
+    with a stderr warning when the value is not a recognised level name.
+
+    Without this guard a typo (``BVIDFE_LOG_LEVEL=DUBG``) raised ValueError
+    at module import time and prevented the package from being imported.
+    """
+    raw = os.environ.get("BVIDFE_LOG_LEVEL", default).upper()
+    level = logging.getLevelName(raw)
+    if isinstance(level, int):
+        return level
+    sys.stderr.write(
+        f"[bvidfe] BVIDFE_LOG_LEVEL={raw!r} is not a valid log level "
+        f"(use DEBUG/INFO/WARNING/ERROR/CRITICAL); defaulting to {default}.\n"
+    )
+    return logging.getLevelName(default)
+
+
+def _resolve_max_dof(default: int = 500000) -> int:
+    """Resolve BVIDFE_FE3D_MAX_DOF → positive int, falling back to ``default``
+    with a stderr warning when the value is not a positive integer."""
+    raw = os.environ.get("BVIDFE_FE3D_MAX_DOF")
+    if raw is None:
+        return default
+    try:
+        v = int(raw)
+        if v <= 0:
+            raise ValueError(f"must be > 0 (got {v})")
+        return v
+    except ValueError as exc:
+        sys.stderr.write(
+            f"[bvidfe] BVIDFE_FE3D_MAX_DOF={raw!r} is not a positive int "
+            f"({exc}); defaulting to {default}.\n"
+        )
+        return default
+
+
 if not _log.handlers:
     _h = logging.StreamHandler(sys.stderr)
     _h.setFormatter(logging.Formatter("[bvidfe.fe3d %(asctime)s] %(message)s", "%H:%M:%S"))
     _log.addHandler(_h)
-    _log.setLevel(os.environ.get("BVIDFE_LOG_LEVEL", "INFO").upper())
+    _log.setLevel(_resolve_log_level())
 
 
 def _t(msg: str, t0: float) -> None:
@@ -52,8 +91,10 @@ def _t(msg: str, t0: float) -> None:
 # + scipy sparse LU factorization start risking memory exhaustion and native-
 # code crashes (scipy calls into BLAS/SuiteSparse which cannot be caught by
 # Python exception handling — an OOM there is a SIGSEGV in the parent process).
-# Override via BVIDFE_FE3D_MAX_DOF env var at your own risk.
-FE3D_MAX_DOF: int = int(os.environ.get("BVIDFE_FE3D_MAX_DOF", "500000"))
+# Override via BVIDFE_FE3D_MAX_DOF env var at your own risk; an invalid
+# value falls back to the default with a stderr warning instead of raising
+# at import time.
+FE3D_MAX_DOF: int = _resolve_max_dof()
 
 
 class FE3DSizeError(RuntimeError):
@@ -78,8 +119,22 @@ def _guard_problem_size(cfg: AnalysisConfig) -> None:
         )
 
 
+# Voigt indices: [xx, yy, zz, yz, xz, xy] = [0, 1, 2, 3, 4, 5]
+# In-plane components live on rows/cols {0, 1, 5}; out-of-plane on {2, 3, 4}.
+# After rotation about z (Hex8Element.ply_angle_deg) these blocks remain
+# decoupled in C_global, so the mask below applies cleanly in the global
+# frame. See fe_mesh.DAMAGE_OOP_FACTOR / DAMAGE_FIBER_BREAK_INPLANE_FACTOR
+# docstrings for the physical model.
+_INPLANE_VOIGT = np.array([0, 1, 5])
+
+
 def _build_elements(mesh: FeMesh, lam: Laminate) -> List[Hex8Element]:
-    """Build a Hex8Element for each mesh element, with damage-aware stiffness scaling."""
+    """Build a Hex8Element for each mesh element with component-wise damage scaling.
+
+    Two factors are applied to the 6x6 elasticity matrix:
+      - `mesh.damage_factors[e]` scales OOP and in-plane/OOP cross terms
+      - `mesh.in_plane_damage_factors[e]` scales the in-plane sub-block
+    """
     elements: List[Hex8Element] = []
     for eidx in range(mesh.n_elements):
         node_ids = mesh.element_connectivity[eidx]
@@ -87,9 +142,14 @@ def _build_elements(mesh: FeMesh, lam: Laminate) -> List[Hex8Element]:
         mat = lam.material
         ply_angle = float(mesh.ply_angles_deg[eidx])
         elem = Hex8Element(node_coords, mat, ply_angle_deg=ply_angle)
-        # Scale the pre-computed global stiffness by damage factor
-        factor = float(mesh.damage_factors[eidx])
-        elem._C_global = elem._C_global * factor
+        f_oop = float(mesh.damage_factors[eidx])
+        f_ip = float(mesh.in_plane_damage_factors[eidx])
+        # Build a 6x6 element-wise scaling mask: start from f_oop everywhere
+        # (OOP block + Poisson cross-coupling), then overwrite the 3x3
+        # in-plane sub-block on rows/cols {0, 1, 5} with f_ip.
+        mask = np.full((6, 6), f_oop)
+        mask[np.ix_(_INPLANE_VOIGT, _INPLANE_VOIGT)] = f_ip
+        elem._C_global = elem._C_global * mask
         elements.append(elem)
     return elements
 
@@ -100,6 +160,36 @@ def _resolve_material(cfg: AnalysisConfig):
 
         return MATERIAL_LIBRARY[cfg.material]
     return cfg.material
+
+
+def _fe3d_preflight(
+    cfg: AnalysisConfig,
+    damage: DamageState,
+    lam: Laminate,
+    *,
+    label: str = "fe3d",
+) -> tuple[FeMesh, List[Hex8Element], float]:
+    """Run the size guard, build the damaged mesh, and build elements.
+
+    Factors the duplicated pre-flight prologue used by every fe3d entry
+    point (``fe3d_cai_buckling``, ``_fe3d_cai_first_ply_failure``,
+    ``fe3d_tai``). The ``label`` differentiates the per-stage log line so
+    a stderr trace still distinguishes "fe3d FPF" from "fe3d buckling".
+
+    Returns
+    -------
+    (mesh, elements, t0)
+        ``t0`` is ``time.time()`` captured before the mesh build, suitable
+        for relative timing logs in the caller.
+    """
+    _guard_problem_size(cfg)
+    t0 = time.time()
+    _log.info("%s: mesh build start", label)
+    mesh = build_fe_mesh(cfg, damage)
+    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
+    elements = _build_elements(mesh, lam)
+    _t("elements built", t0)
+    return mesh, elements, t0
 
 
 def _solve_failure_strain_analytic(
@@ -127,6 +217,13 @@ def _solve_failure_strain_analytic(
     This replaces the prior 10-12 iteration bisection (each iteration
     reassembled and re-solved the full FE system), giving a ~10x speedup
     for the FPF path with identical results on the quadratic branches.
+
+    The per-element inner Gauss-point loop is vectorised via the batch
+    criterion helpers (``larc05_index_batch`` / ``tsai_wu_index_batch``).
+    Numerical equivalence with the prior scalar form is locked by
+    ``tests/analysis/test_fpf_strain_solve_equivalence.py`` against the
+    ``_solve_failure_strain_analytic_scalar_ref`` reference implementation
+    kept in this module purely for the equivalence test.
     """
     material = _resolve_material(cfg)
 
@@ -137,41 +234,101 @@ def _solve_failure_strain_analytic(
         bcs = tension_bcs(mesh.node_coords, strain_sign * strain_cap)
     u_ref = solve_linear_static(elements, mesh.element_dof_maps, mesh.n_dof, bcs)
 
-    c_crit_min = np.inf  # smallest positive multiplier across all GPs
+    c_crit_min = np.inf
     for eidx, elem in enumerate(elements):
         dof_map = mesh.element_dof_maps[eidx]
-        sigma_field_ref = elem.stress_at_gauss_points(u_ref[dof_map])  # (n_gp, 6)
+        sigma_ref = elem.stress_at_gauss_points(u_ref[dof_map])  # (n_gp, 6)
+
+        if criterion == "larc05":
+            idx_ref = larc05_index_batch(material, sigma_ref)  # (n_gp,)
+            valid = idx_ref > 0
+            if not bool(valid.any()):
+                continue
+            # LaRC05 modes are sums of squared normalised stresses, so
+            # idx(c) = c^2 * idx(1)  ->  c_crit = 1 / sqrt(idx_ref).
+            c_crit = np.where(
+                valid, 1.0 / np.sqrt(np.where(valid, idx_ref, 1.0)), np.inf
+            )
+            c_crit_elem_min = float(c_crit.min())
+        else:
+            # Tsai-Wu: idx(c) = a*c + b*c^2. Solve a, b from two samples
+            # (c=1 and c=2). System: a + b = idx_ref;  2a + 4b = idx_2.
+            idx_ref = tsai_wu_index_batch(material, sigma_ref)  # (n_gp,)
+            sigma_2 = 2.0 * sigma_ref
+            idx_2 = tsai_wu_index_batch(material, sigma_2)  # (n_gp,)
+            b = (idx_2 - 2.0 * idx_ref) / 2.0
+            a = idx_ref - b
+            valid = idx_ref > 0
+            tiny = 1e-14
+            # Initialise c_crit = +inf so masked-out points never drive the min.
+            c_crit = np.full_like(idx_ref, np.inf, dtype=float)
+            # Branch 1: |b| < tiny and |a| > tiny -> c = 1/a.
+            mask_lin = valid & (np.abs(b) < tiny) & (np.abs(a) >= tiny)
+            # Use np.where to keep divisor non-zero for inactive lanes.
+            c_lin = 1.0 / np.where(mask_lin, a, 1.0)
+            c_crit = np.where(mask_lin, c_lin, c_crit)
+            # Branch 2: |b| >= tiny and disc >= 0 -> c = (-a + sqrt(disc)) / (2b).
+            mask_quad = valid & (np.abs(b) >= tiny)
+            disc = a * a + 4.0 * b
+            mask_quad_real = mask_quad & (disc >= 0)
+            sqrt_disc = np.sqrt(np.where(mask_quad_real, disc, 0.0))
+            c_quad = (-a + sqrt_disc) / np.where(mask_quad_real, 2.0 * b, 1.0)
+            c_crit = np.where(mask_quad_real, c_quad, c_crit)
+            # Filter c_crit > 0 (Tsai-Wu can produce a non-physical
+            # negative root when the linear and quadratic terms have
+            # opposite signs in a way that doesn't bracket failure).
+            c_crit = np.where(c_crit > 0, c_crit, np.inf)
+            c_crit_elem_min = float(c_crit.min())
+
+        if c_crit_elem_min < c_crit_min:
+            c_crit_min = c_crit_elem_min
+
+    if not np.isfinite(c_crit_min) or c_crit_min <= 0:
+        return strain_cap  # nothing failed up to strain_cap
+    return min(strain_cap, c_crit_min * strain_cap)
+
+
+def _solve_failure_strain_analytic_scalar_ref(
+    cfg: AnalysisConfig,
+    mesh: FeMesh,
+    elements: List[Hex8Element],
+    strain_sign: int,
+    criterion: str,
+    strain_cap: float = 0.05,
+) -> float:
+    """Reference (pre-vectorisation) scalar implementation of
+    ``_solve_failure_strain_analytic``.
+
+    Kept intact for the equivalence test in
+    ``tests/analysis/test_fpf_strain_solve_equivalence.py`` so any future
+    edit to the production routine immediately surfaces a numerical
+    drift. NOT called from production code; do not use directly.
+    """
+    material = _resolve_material(cfg)
+
+    if criterion == "larc05":
+        bcs = compression_bcs(mesh.node_coords, strain_sign * strain_cap)
+    else:
+        bcs = tension_bcs(mesh.node_coords, strain_sign * strain_cap)
+    u_ref = solve_linear_static(elements, mesh.element_dof_maps, mesh.n_dof, bcs)
+
+    c_crit_min = np.inf
+    for eidx, elem in enumerate(elements):
+        dof_map = mesh.element_dof_maps[eidx]
+        sigma_field_ref = elem.stress_at_gauss_points(u_ref[dof_map])
         for gp in range(sigma_field_ref.shape[0]):
             sigma_ref = sigma_field_ref[gp]
-            # For each criterion, evaluate the index at c=1 (reference state).
-            # If index at c=1 is below 1, scale c to bring it to 1.
             if criterion == "larc05":
                 idx_ref = larc05_index(material, sigma_ref)
             else:
                 idx_ref = tsai_wu_index(material, sigma_ref)
             if idx_ref <= 0:
                 continue
-            # Both LaRC05 (in each branch) and Tsai-Wu have
-            #   idx(c) = a * c + b * c^2  where a, b evaluated at sigma_ref.
-            # For pure stress scaling: idx(c) / idx(1) = (a*c + b*c^2)/(a + b).
-            # In the LaRC05 case all active terms are c^2 terms (no linear in
-            # stress), so idx(c) = c^2 * idx_ref ⇒ c_crit = 1/sqrt(idx_ref).
-            # Tsai-Wu has linear terms in stress, so use general quadratic
-            # solve. We build a,b by evaluating idx at c=1 and c=0.5:
-            #   idx(1.0) = a + b
-            #   idx(0.5) = 0.5 a + 0.25 b
-            # -> b = 4/3 * (idx_1 - 2*idx_half)*(-1) ... easier: evaluate at
-            # c=1 and c=2, solve 2-eqn linear system.
             if criterion == "larc05":
-                # Purely quadratic in stress-magnitude (each mode is sum of
-                # squared normalized stresses) so idx(c) = c^2 * idx_ref.
                 c_crit = 1.0 / np.sqrt(idx_ref)
             else:
-                # Tsai-Wu: idx(c) = a*c + b*c^2. Use linear algebra from 2 samples.
                 sigma_2 = 2.0 * sigma_ref
                 idx_2 = tsai_wu_index(material, sigma_2)
-                # System: a + b = idx_ref;  2*a + 4*b = idx_2
-                # -> b = (idx_2 - 2*idx_ref) / 2;  a = idx_ref - b
                 b = (idx_2 - 2.0 * idx_ref) / 2.0
                 a = idx_ref - b
                 if abs(b) < 1e-14:
@@ -179,7 +336,7 @@ def _solve_failure_strain_analytic(
                         continue
                     c_crit = 1.0 / a
                 else:
-                    disc = a * a + 4.0 * b  # 4*b*1 from ax+bx^2=1 -> bx^2+ax-1=0
+                    disc = a * a + 4.0 * b
                     if disc < 0:
                         continue
                     c_crit = (-a + np.sqrt(disc)) / (2.0 * b)
@@ -189,7 +346,7 @@ def _solve_failure_strain_analytic(
                 c_crit_min = c_crit
 
     if not np.isfinite(c_crit_min) or c_crit_min <= 0:
-        return strain_cap  # nothing failed up to strain_cap
+        return strain_cap
     return min(strain_cap, c_crit_min * strain_cap)
 
 
@@ -210,13 +367,7 @@ def _fe3d_cai_first_ply_failure(
     Original v0.1.0 implementation — bisects on applied strain until LaRC05 failure
     index reaches 1 on the damaged mesh. Retained as fallback / comparison path.
     """
-    _guard_problem_size(cfg)
-    t0 = time.time()
-    _log.info("fe3d FPF: mesh build start")
-    mesh = build_fe_mesh(cfg, damage)
-    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
-    elements = _build_elements(mesh, lam)
-    _t("elements built", t0)
+    mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d FPF")
     strain_at_failure = _solve_failure_strain_analytic(
         cfg,
         mesh,
@@ -241,7 +392,7 @@ def fe3d_cai_buckling(
     lam: Laminate,
     sigma_pristine_MPa: float,
     sigma_ref_MPa: float = 1.0,
-) -> tuple[float, float]:
+) -> tuple[float, float, List[str]]:
     """3D FE compression-after-impact via true linear buckling eigensolve.
 
     Assembles K and K_g under a constant uniaxial pre-stress sigma_ref along x
@@ -250,30 +401,34 @@ def fe3d_cai_buckling(
 
     Uses the "constant pre-stress" approximation (Cook §17.7 / Bathe §6.8):
     - sigma_0 = sigma_ref_MPa along x everywhere (unit reference compression).
-    - Damaged elements carry damage_factor * sigma_0 (reduced stress-carrying capacity).
+    - Damaged elements carry in_plane_damage_factor * sigma_0 (reduced load
+      fraction in fiber-break-core elements; pure-delamination elements carry
+      the full uniaxial load because the plies remain intact).
     - K_g is assembled element-by-element from Hex8Element.geometric_stiffness_matrix().
     - A minimal penalty-BC set suppresses rigid-body modes before the eigensolve.
 
     Returns
     -------
-    (sigma_critical_MPa, lambda_crit)
+    (sigma_critical_MPa, lambda_crit, notes)
         sigma_critical_MPa : min(lambda_crit * sigma_ref, sigma_pristine_MPa)
         lambda_crit        : smallest positive buckling load factor (0 if solve failed)
+        notes              : list of human-readable diagnostic strings emitted
+                             during this call (e.g. eigensolver failure /
+                             no-positive-eigenvalue fallback). Empty when the
+                             solve was clean. Surfaced via
+                             ``AnalysisResults.notes``.
     """
-    _guard_problem_size(cfg)
-    t0 = time.time()
-    _log.info("fe3d buckling: mesh build start")
-    mesh = build_fe_mesh(cfg, damage)
-    _t(f"mesh build done: {mesh.n_elements} elements, {mesh.n_dof} DOFs", t0)
-    elements = _build_elements(mesh, lam)
-    _t("elements built", t0)
+    mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d buckling")
 
     # Assemble elastic stiffness K
     K = assemble_global_stiffness(elements, mesh.element_dof_maps, mesh.n_dof)
     _t("K assembled", t0)
 
     # Assemble geometric stiffness K_g under uniform uniaxial pre-stress sigma_ref along x.
-    # Damaged elements carry damage_factor * sigma_ref (reduced load fraction).
+    # The pre-stress is sigma_xx (Voigt index 0, an in-plane component), so the
+    # damaged-element load fraction is the IN-PLANE damage factor — pure
+    # delamination zones still carry full uniaxial load (in_plane_factor ≈ 1.0)
+    # because the plies remain intact; only fiber-break-core elements carry less.
     sigma_bar_ref = np.zeros((3, 3))
     sigma_bar_ref[0, 0] = sigma_ref_MPa
 
@@ -282,7 +437,7 @@ def fe3d_cai_buckling(
     cols_chunks: list[np.ndarray] = []
     data_chunks: list[np.ndarray] = []
     for eidx, elem in enumerate(elements):
-        damage_f = float(mesh.damage_factors[eidx])
+        damage_f = float(mesh.in_plane_damage_factors[eidx])
         sigma_elem = sigma_bar_ref * damage_f
         Kg_e = elem.geometric_stiffness_matrix(sigma_elem)
         dof_arr = np.asarray(mesh.element_dof_maps[eidx], dtype=np.int64)
@@ -341,11 +496,21 @@ def fe3d_cai_buckling(
         positive_eigs = [float(e) for e in eigs if e > 1e-6]
         if not positive_eigs:
             _log.info("fe3d buckling: no positive eigenvalue, returning pristine")
-            return sigma_pristine_MPa, 0.0
+            note = (
+                "fe3d buckling: eigensolver returned no positive eigenvalue; "
+                "fell back to pristine strength (knockdown=1.0 may not reflect "
+                "actual damage effect)"
+            )
+            return sigma_pristine_MPa, 0.0, [note]
         lambda_crit = min(positive_eigs)
     except Exception as exc:  # noqa: BLE001
         _log.warning("fe3d buckling eigensolve failed: %s", exc)
-        return sigma_pristine_MPa, 0.0
+        note = (
+            f"fe3d buckling: eigensolver raised {type(exc).__name__}: {exc}; "
+            "fell back to pristine strength (knockdown=1.0 does not reflect "
+            "actual damage effect)"
+        )
+        return sigma_pristine_MPa, 0.0, [note]
 
     sigma_critical = lambda_crit * sigma_ref_MPa
     _log.info(
@@ -354,7 +519,7 @@ def fe3d_cai_buckling(
         sigma_critical,
         time.time() - t0,
     )
-    return min(sigma_critical, sigma_pristine_MPa), lambda_crit
+    return min(sigma_critical, sigma_pristine_MPa), lambda_crit, []
 
 
 def fe3d_cai(
@@ -368,8 +533,14 @@ def fe3d_cai(
     Primary path: true linear buckling eigensolve (fe3d_cai_buckling).
     Fallback: first-ply-failure on damaged mesh (_fe3d_cai_first_ply_failure).
     Returns the smaller of the two — whichever failure mode governs.
+
+    Notes from the buckling solve are discarded by this convenience wrapper;
+    callers that need them should invoke fe3d_cai_buckling directly (as
+    BvidAnalysis.run does).
     """
-    sigma_buckling, lambda_crit = fe3d_cai_buckling(cfg, damage, lam, sigma_pristine_MPa)
+    sigma_buckling, _lambda_crit, _notes = fe3d_cai_buckling(
+        cfg, damage, lam, sigma_pristine_MPa
+    )
     sigma_fpf = _fe3d_cai_first_ply_failure(cfg, damage, lam, sigma_pristine_MPa)
     return min(sigma_buckling, sigma_fpf)
 
@@ -381,9 +552,7 @@ def fe3d_tai(
     sigma_pristine_MPa: float,
 ) -> float:
     """3D FE tension-after-impact residual strength (MPa)."""
-    _guard_problem_size(cfg)
-    mesh = build_fe_mesh(cfg, damage)
-    elements = _build_elements(mesh, lam)
+    mesh, elements, _t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d TAI")
     strain_at_failure = _solve_failure_strain_analytic(
         cfg,
         mesh,

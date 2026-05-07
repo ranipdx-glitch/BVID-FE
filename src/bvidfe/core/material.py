@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -14,6 +15,15 @@ class OrthotropicMaterial:
 
     Units: moduli and strengths in MPa (N/mm^2), fracture toughness in N/mm,
     density in t/mm^3 (consistent units for a SI-mm-N-s system).
+
+    Through-thickness strengths (Zt, Zc) and the 1-3 shear strength (S13)
+    are optional. For unidirectional CFRP plies under the transverse-isotropy
+    assumption, leaving these as ``None`` falls back to the in-plane
+    transverse values via the ``Zt_resolved`` / ``Zc_resolved`` /
+    ``S13_resolved`` properties (Zt → Yt, Zc → Yc, S13 → S12). Override only
+    when material-specific through-thickness data are available — measured
+    Zt is typically 20-40% lower than Yt for void-prone CFRP (Makeev et al.
+    2012, *Composites Part A*).
     """
 
     name: str
@@ -41,6 +51,11 @@ class OrthotropicMaterial:
     soutis_k_s: float = 2.5
     soutis_m: float = 0.5
     wn_d0_mm: float = 1.0
+    # Through-thickness strengths and 1-3 shear (None = transverse-isotropy
+    # fallback to Yt / Yc / S12 via the *_resolved properties below).
+    Zt: Optional[float] = None
+    Zc: Optional[float] = None
+    S13: Optional[float] = None
 
     def __post_init__(self) -> None:
         positive_fields = (
@@ -63,12 +78,34 @@ class OrthotropicMaterial:
             v = getattr(self, k)
             if v <= 0:
                 raise ValueError(f"{k} must be > 0 (got {v})")
+        for k in ("Zt", "Zc", "S13"):
+            v = getattr(self, k)
+            if v is not None and v <= 0:
+                raise ValueError(f"{k} must be > 0 if provided (got {v})")
         if not -1.0 < self.nu12 < 0.5:
             raise ValueError(f"nu12 out of physical range (got {self.nu12})")
 
     @property
     def nu21(self) -> float:
         return self.nu12 * self.E22 / self.E11
+
+    @property
+    def Zt_resolved(self) -> float:
+        """Through-thickness tensile strength; falls back to Yt under
+        transverse isotropy when not explicitly set."""
+        return self.Yt if self.Zt is None else self.Zt
+
+    @property
+    def Zc_resolved(self) -> float:
+        """Through-thickness compressive strength; falls back to Yc under
+        transverse isotropy when not explicitly set."""
+        return self.Yc if self.Zc is None else self.Zc
+
+    @property
+    def S13_resolved(self) -> float:
+        """1-3 plane shear strength; falls back to S12 under transverse
+        isotropy when not explicitly set."""
+        return self.S12 if self.S13 is None else self.S13
 
     def get_compliance_matrix(self) -> np.ndarray:
         """Return the 6x6 orthotropic compliance matrix in Voigt notation

@@ -22,7 +22,14 @@ def soutis_cai(
     A_panel_mm2: float,
     sigma_pristine_MPa: float,
 ) -> float:
-    """Compression-after-impact residual strength via Soutis knockdown."""
+    """Compression-after-impact residual strength via Soutis knockdown.
+
+    Returns ``kd * sigma_pristine_MPa`` where
+    ``kd = 1 / (1 + k_s * (DPA/A_panel)^m)``. Reaches ``sigma_pristine_MPa``
+    exactly when ``dpa_mm2 == 0``. The returned value is the numerator
+    used by ``BvidAnalysis.run()`` to compute ``AnalysisResults.knockdown``;
+    the pristine reference is the same for all three tiers.
+    """
     if dpa_mm2 <= 0:
         return sigma_pristine_MPa
     kd = 1.0 / (1.0 + m.soutis_k_s * (dpa_mm2 / A_panel_mm2) ** m.soutis_m)
@@ -37,6 +44,10 @@ def whitney_nuismer_tai(
 ) -> float:
     """Tension-after-impact via Whitney-Nuismer point-stress on an equivalent
     circular hole of diameter 2*sqrt(DPA/pi).
+
+    Used by both the ``empirical`` and ``semi_analytical`` tiers for TAI
+    (the semi-analytical TAI path delegates here unchanged), so those two
+    tiers report mathematically identical knockdown values for tension.
     """
     if dpa_mm2 <= 0:
         return sigma_pristine_MPa
