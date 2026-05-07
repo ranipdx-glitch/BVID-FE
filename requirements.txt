@@ -1,17 +1,33 @@
-# Pinned runtime dependencies for the bvidfe library + CLI.
+# Pinned runtime dependencies for the bvidfe library + CLI + Streamlit
+# Cloud deployment.
 #
-# Only packages that src/bvidfe/ actually imports at runtime; PyQt6 and
-# pyvista (GUI), and pytest / ruff / black / pytest-qt (dev tools) live
-# in the optional-extras of pyproject.toml and are not duplicated here.
+# Streamlit Community Cloud reads this file at deploy time. The leading
+# "." entry triggers `pip install .` so Streamlit Cloud installs the
+# bvidfe package itself from pyproject.toml — without it, app.py would
+# import-fail because the cloud worker's PYTHONPATH does not include
+# the repo's src/ tree by default.
 #
-# Install GUI-bundled or dev-bundled environments via the extras instead:
-#   pip install -e ".[gui]"        # GUI only
-#   pip install -e ".[dev]"        # dev tools
-#   pip install -e ".[all]"        # everything
+# Headless library users (no Streamlit, no GUI) can ignore the streamlit
+# line — it is pure-Python and adds no native build cost. PyQt6 and
+# pyvista (desktop GUI) and pytest / pytest-qt / ruff / black (dev
+# tools) are intentionally NOT here; they live in pyproject.toml's
+# optional-extras and ship via:
 #
-# Versions below are the late-2024 stable releases that fall inside
-# pyproject.toml's existing >= / < bounds. Re-pin from `pip freeze` in
-# the validated build environment if you ship a different combination.
+#     pip install -e ".[gui]"        # GUI only
+#     pip install -e ".[dev]"        # dev tools
+#     pip install -e ".[all]"        # everything
+#
+# Versions are late-2024 stable releases inside pyproject.toml's bounds.
+# Re-pin from `pip freeze` in the validated build environment if a
+# different combination ships.
+
+# Editable install of the bvidfe package itself — REQUIRED by app.py.
+.
+
+# Streamlit web framework.
+streamlit==1.40.0
+
+# Heavy numerical libraries (same as the headless / desktop runtime).
 numpy==2.1.3
 scipy==1.14.1
 matplotlib==3.9.3
