@@ -76,8 +76,9 @@ def test_main_window_has_file_menu(qtbot):
     assert any("File" in t for t in actions)
 
 
-def _drive_load_config(qtbot, monkeypatch, tmp_path, file_text: str | None,
-                       *, write_invalid_json: bool = False):
+def _drive_load_config(
+    qtbot, monkeypatch, tmp_path, file_text: str | None, *, write_invalid_json: bool = False
+):
     """Helper: monkeypatch QFileDialog + QMessageBox, drive _load_config,
     return (title, body) of the QMessageBox.warning call (or (None, None) if
     no warning was raised)."""
@@ -91,24 +92,30 @@ def _drive_load_config(qtbot, monkeypatch, tmp_path, file_text: str | None,
     elif file_text is not None:
         path.write_text(file_text)
     monkeypatch.setattr(
-        QFileDialog, "getOpenFileName",
+        QFileDialog,
+        "getOpenFileName",
         staticmethod(lambda *a, **kw: (str(path), "")),
     )
     captured: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        QMessageBox, "warning",
+        QMessageBox,
+        "warning",
         staticmethod(lambda parent, title, body, *a, **kw: captured.append((title, body))),
     )
 
     w = BvidMainWindow()
     qtbot.addWidget(w)
     w._load_config()
-    return (captured[0] if captured else (None, None))
+    return captured[0] if captured else (None, None)
 
 
 def test_load_config_malformed_json_distinct_message(qtbot, monkeypatch, tmp_path):
     title, body = _drive_load_config(
-        qtbot, monkeypatch, tmp_path, "{not valid json", write_invalid_json=True,
+        qtbot,
+        monkeypatch,
+        tmp_path,
+        "{not valid json",
+        write_invalid_json=True,
     )
     assert title == "Malformed JSON"
     assert "JSON" in body or "json" in body
@@ -117,7 +124,9 @@ def test_load_config_malformed_json_distinct_message(qtbot, monkeypatch, tmp_pat
 def test_load_config_missing_field_distinct_message(qtbot, monkeypatch, tmp_path):
     # Valid JSON but missing required 'material' key
     title, body = _drive_load_config(
-        qtbot, monkeypatch, tmp_path,
+        qtbot,
+        monkeypatch,
+        tmp_path,
         '{"layup_deg": [0, 90], "ply_thickness_mm": 0.152}',
     )
     assert title == "Missing field"
@@ -133,7 +142,11 @@ def test_load_config_invalid_value_distinct_message(qtbot, monkeypatch, tmp_path
         "panel": {"Lx_mm": 100, "Ly_mm": 50, "boundary": "simply_supported"},
         "loading": "compression",
         "tier": "empirical",
-        "impact": {"energy_J": 10.0, "impactor": {"diameter_mm": 16.0, "shape": "hemispherical"}, "mass_kg": 5.5},
+        "impact": {
+            "energy_J": 10.0,
+            "impactor": {"diameter_mm": 16.0, "shape": "hemispherical"},
+            "mass_kg": 5.5,
+        },
     }
     title, body = _drive_load_config(qtbot, monkeypatch, tmp_path, json.dumps(bad))
     assert title == "Invalid value"

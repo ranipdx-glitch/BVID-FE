@@ -8,13 +8,13 @@ so the main window now connects every relevant panel's ``configChanged``
 signal to a single ``_update_live_onset`` slot. These tests pin that
 behavior so it never silently breaks again.
 """
+
 from __future__ import annotations
 
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import pytest
 
 from bvidfe.gui.main_window import BvidMainWindow
 

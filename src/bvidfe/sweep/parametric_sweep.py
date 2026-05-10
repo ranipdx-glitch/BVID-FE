@@ -71,9 +71,7 @@ def _try_run_one(cfg: AnalysisConfig, on_error: str, label: str) -> dict:
     """Invoke ``_run_one`` and translate any exception to a NaN-filled row
     according to ``on_error``. ``label`` is used in the warning text."""
     if on_error not in _ON_ERROR_VALUES:
-        raise ValueError(
-            f"on_error must be one of {_ON_ERROR_VALUES} (got {on_error!r})"
-        )
+        raise ValueError(f"on_error must be one of {_ON_ERROR_VALUES} (got {on_error!r})")
     try:
         return _run_one(cfg)
     except Exception as exc:  # noqa: BLE001

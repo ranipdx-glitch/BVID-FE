@@ -117,9 +117,7 @@ def sublaminate_buckling_load(
     upper_thicknesses = full_thicknesses[: i + 1]
     lower_thicknesses = full_thicknesses[i + 1 :]
     sub_thicknesses = (
-        upper_thicknesses
-        if len(upper_layup) <= len(lower_layup)
-        else lower_thicknesses
+        upper_thicknesses if len(upper_layup) <= len(lower_layup) else lower_thicknesses
     )
     D = _sublaminate_D_matrix(lam.material, sub_layup, sub_thicknesses)
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]

@@ -5,14 +5,11 @@ users could not see WHERE the impact happened on the panel, which matters
 for off-center impacts. The marker was added because inspection of the
 rendered tab revealed the gap.
 """
+
 from __future__ import annotations
 
-import warnings
-
-import pytest
 
 from bvidfe.core.geometry import PanelGeometry
-from bvidfe.core.material import MATERIAL_LIBRARY, OrthotropicMaterial
 from bvidfe.damage.state import DamageState, DelaminationEllipse
 from bvidfe.viz.plots_2d import plot_damage_map
 
@@ -29,9 +26,7 @@ def _make_damage(centroid=(100.0, 50.0), fbr=0.0):
         )
         for i in range(3)
     ]
-    return DamageState(
-        delaminations=ellipses, dent_depth_mm=0.4, fiber_break_radius_mm=fbr
-    )
+    return DamageState(delaminations=ellipses, dent_depth_mm=0.4, fiber_break_radius_mm=fbr)
 
 
 def test_plot_damage_map_has_impact_marker_in_legend():

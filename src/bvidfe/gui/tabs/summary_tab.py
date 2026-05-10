@@ -28,6 +28,7 @@ def _density_kg_per_mm3(config_snapshot: dict) -> float | None:
     if isinstance(mat, str):
         try:
             from bvidfe.core.material import MATERIAL_LIBRARY
+
             return MATERIAL_LIBRARY[mat].rho
         except Exception:
             return None

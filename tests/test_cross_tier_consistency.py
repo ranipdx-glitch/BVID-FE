@@ -24,9 +24,9 @@ import math
 
 import pytest
 
-from bvidfe.analysis import AnalysisConfig, BvidAnalysis, MeshParams
+from bvidfe.analysis import AnalysisConfig, BvidAnalysis
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
-from bvidfe.damage.state import DamageState, DelaminationEllipse
+from bvidfe.damage.state import DamageState
 from bvidfe.impact.mapping import ImpactEvent
 
 
@@ -82,9 +82,9 @@ def test_pristine_input_yields_unity_knockdown():
     for tier in ("empirical", "semi_analytical"):
         cfg = AnalysisConfig(tier=tier, **common)
         r = BvidAnalysis(cfg).run()
-        assert r.knockdown == pytest.approx(1.0, rel=1e-12), (
-            f"tier={tier} knockdown={r.knockdown!r} should be 1.0 on pristine input"
-        )
+        assert r.knockdown == pytest.approx(
+            1.0, rel=1e-12
+        ), f"tier={tier} knockdown={r.knockdown!r} should be 1.0 on pristine input"
 
 
 def test_knockdown_is_finite_and_bounded():

@@ -12,7 +12,6 @@ import pytest
 
 from bvidfe.cli import _existing_path, _parse_layup, _parse_panel, _positive_float
 
-
 # ---------- _parse_panel ----------
 
 

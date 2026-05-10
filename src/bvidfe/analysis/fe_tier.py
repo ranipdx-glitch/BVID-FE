@@ -246,9 +246,7 @@ def _solve_failure_strain_analytic(
                 continue
             # LaRC05 modes are sums of squared normalised stresses, so
             # idx(c) = c^2 * idx(1)  ->  c_crit = 1 / sqrt(idx_ref).
-            c_crit = np.where(
-                valid, 1.0 / np.sqrt(np.where(valid, idx_ref, 1.0)), np.inf
-            )
+            c_crit = np.where(valid, 1.0 / np.sqrt(np.where(valid, idx_ref, 1.0)), np.inf)
             c_crit_elem_min = float(c_crit.min())
         else:
             # Tsai-Wu: idx(c) = a*c + b*c^2. Solve a, b from two samples
@@ -477,9 +475,11 @@ def fe3d_cai_buckling(
             np.abs(coords[:, 0] - x_max) < tol
         )
         if boundary == "clamped":
-            lateral_edge_mask = loaded_edge_mask | (
-                np.abs(coords[:, 1] - y_min) < tol
-            ) | (np.abs(coords[:, 1] - y_max) < tol)
+            lateral_edge_mask = (
+                loaded_edge_mask
+                | (np.abs(coords[:, 1] - y_min) < tol)
+                | (np.abs(coords[:, 1] - y_max) < tol)
+            )
         else:  # simply_supported
             lateral_edge_mask = loaded_edge_mask
         for node_idx in np.where(lateral_edge_mask)[0]:
@@ -538,9 +538,7 @@ def fe3d_cai(
     callers that need them should invoke fe3d_cai_buckling directly (as
     BvidAnalysis.run does).
     """
-    sigma_buckling, _lambda_crit, _notes = fe3d_cai_buckling(
-        cfg, damage, lam, sigma_pristine_MPa
-    )
+    sigma_buckling, _lambda_crit, _notes = fe3d_cai_buckling(cfg, damage, lam, sigma_pristine_MPa)
     sigma_fpf = _fe3d_cai_first_ply_failure(cfg, damage, lam, sigma_pristine_MPa)
     return min(sigma_buckling, sigma_fpf)
 

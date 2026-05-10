@@ -27,8 +27,7 @@ class MeshParams:
             )
         if not (self.in_plane_size_mm > 0):
             raise ValueError(
-                f"MeshParams.in_plane_size_mm must be > 0 "
-                f"(got {self.in_plane_size_mm!r})"
+                f"MeshParams.in_plane_size_mm must be > 0 " f"(got {self.in_plane_size_mm!r})"
             )
         if not (self.cohesive_zone_factor > 0):
             raise ValueError(
@@ -73,13 +72,9 @@ class AnalysisConfig:
                 )
             for i, t in enumerate(self.ply_thickness_mm):
                 if not (float(t) > 0):
-                    raise ValueError(
-                        f"ply_thickness_mm[{i}] must be > 0 (got {t})."
-                    )
+                    raise ValueError(f"ply_thickness_mm[{i}] must be > 0 (got {t}).")
         else:
             if not (float(self.ply_thickness_mm) > 0):
-                raise ValueError(
-                    f"ply_thickness_mm must be > 0 (got {self.ply_thickness_mm})."
-                )
+                raise ValueError(f"ply_thickness_mm must be > 0 (got {self.ply_thickness_mm}).")
         if self.tier == "fe3d" and self.mesh is None:
             self.mesh = MeshParams()

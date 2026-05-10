@@ -69,11 +69,6 @@ def test_sweep_energies_default_raises_on_iteration_failure(monkeypatch):
     cfg = _base_impact_cfg()
     from bvidfe.sweep import parametric_sweep as ps
 
-    def _flaky(cfg):
-        if cfg.impact.energy_J == 10.0:
-            raise RuntimeError("synthetic failure")
-        return ps._run_one.__wrapped__(cfg) if hasattr(ps._run_one, "__wrapped__") else _real_run_one(cfg)
-
     real_run_one = ps._run_one
 
     def _patched(cfg):

@@ -22,15 +22,12 @@ import numpy as np
 
 from bvidfe.core.material import OrthotropicMaterial
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 
-def _normalise_ply_thicknesses(
-    raw: Union[float, Sequence[float]], n_plies: int
-) -> list:
+def _normalise_ply_thicknesses(raw: Union[float, Sequence[float]], n_plies: int) -> list:
     """Coerce ``raw`` to a per-ply thickness list of length ``n_plies``.
 
     Accepts a single positive number (uniform thickness) or a sequence of
@@ -52,13 +49,10 @@ def _normalise_ply_thicknesses(
             )
         for i, t in enumerate(ts):
             if t <= 0.0:
-                raise ValueError(
-                    f"ply_thickness_mm[{i}] must be > 0 (got {t})."
-                )
+                raise ValueError(f"ply_thickness_mm[{i}] must be > 0 (got {t}).")
         return ts
     raise TypeError(
-        f"ply_thickness_mm must be a float or sequence of floats "
-        f"(got {type(raw).__name__})."
+        f"ply_thickness_mm must be a float or sequence of floats " f"(got {type(raw).__name__})."
     )
 
 
@@ -376,11 +370,7 @@ class Laminate:
         if self.is_uniform_thickness:
             t_str = f"t_ply={self._ply_thicknesses[0]:.3f} mm"
         else:
-            t_str = (
-                "t_ply=["
-                + ", ".join(f"{t:.3f}" for t in self._ply_thicknesses)
-                + "] mm"
-            )
+            t_str = "t_ply=[" + ", ".join(f"{t:.3f}" for t in self._ply_thicknesses) + "] mm"
         return (
             f"Laminate(n_plies={self.n_plies}, "
             f"h={self.thickness_mm:.3f} mm, "

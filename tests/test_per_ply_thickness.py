@@ -20,7 +20,6 @@ from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.damage.state import DamageState, DelaminationEllipse
 from bvidfe.impact.mapping import ImpactEvent
 
-
 _LAYUP = [0, 45, -45, 90, 90, -45, 45, 0]
 _T = 0.152
 
@@ -75,12 +74,8 @@ def test_uniform_list_matches_scalar_knockdown(tier):
     r_scalar = BvidAnalysis(_make_cfg(_T, tier=tier)).run()
     r_list = BvidAnalysis(_make_cfg([_T] * len(_LAYUP), tier=tier)).run()
     assert r_scalar.knockdown == pytest.approx(r_list.knockdown, rel=1e-12)
-    assert r_scalar.residual_strength_MPa == pytest.approx(
-        r_list.residual_strength_MPa, rel=1e-12
-    )
-    assert r_scalar.pristine_strength_MPa == pytest.approx(
-        r_list.pristine_strength_MPa, rel=1e-12
-    )
+    assert r_scalar.residual_strength_MPa == pytest.approx(r_list.residual_strength_MPa, rel=1e-12)
+    assert r_scalar.pristine_strength_MPa == pytest.approx(r_list.pristine_strength_MPa, rel=1e-12)
 
 
 def test_uniform_list_matches_scalar_tai():
@@ -191,12 +186,18 @@ def test_cli_thickness_accepts_scalar():
     p = _build_parser()
     args = p.parse_args(
         [
-            "--material", "IM7/8552",
-            "--layup", "0,45,-45,90,90,-45,45,0",
-            "--thickness", "0.152",
-            "--panel", "150x100",
-            "--loading", "compression",
-            "--energy", "30",
+            "--material",
+            "IM7/8552",
+            "--layup",
+            "0,45,-45,90,90,-45,45,0",
+            "--thickness",
+            "0.152",
+            "--panel",
+            "150x100",
+            "--loading",
+            "compression",
+            "--energy",
+            "30",
         ]
     )
     assert args.thickness == 0.152
@@ -206,12 +207,18 @@ def test_cli_thickness_accepts_csv_list():
     p = _build_parser()
     args = p.parse_args(
         [
-            "--material", "IM7/8552",
-            "--layup", "0,45,-45,90,90,-45,45,0",
-            "--thickness", "0.10,0.10,0.20,0.20,0.20,0.20,0.10,0.10",
-            "--panel", "150x100",
-            "--loading", "compression",
-            "--energy", "30",
+            "--material",
+            "IM7/8552",
+            "--layup",
+            "0,45,-45,90,90,-45,45,0",
+            "--thickness",
+            "0.10,0.10,0.20,0.20,0.20,0.20,0.10,0.10",
+            "--panel",
+            "150x100",
+            "--loading",
+            "compression",
+            "--energy",
+            "30",
         ]
     )
     assert args.thickness == [0.10, 0.10, 0.20, 0.20, 0.20, 0.20, 0.10, 0.10]
@@ -222,11 +229,17 @@ def test_cli_thickness_rejects_zero_in_list():
     with pytest.raises(SystemExit):
         p.parse_args(
             [
-                "--material", "IM7/8552",
-                "--layup", "0,90,0,90",
-                "--thickness", "0.1,0.0,0.1,0.1",
-                "--panel", "150x100",
-                "--loading", "compression",
-                "--energy", "30",
+                "--material",
+                "IM7/8552",
+                "--layup",
+                "0,90,0,90",
+                "--thickness",
+                "0.1,0.0,0.1,0.1",
+                "--panel",
+                "150x100",
+                "--loading",
+                "compression",
+                "--energy",
+                "30",
             ]
         )

@@ -191,9 +191,7 @@ class BvidMainWindow(QMainWindow):
                 damage = impact_to_damage(event, lam, panel)
             self.impact_panel.set_onset_energy(E)
             A_panel = panel.Lx_mm * panel.Ly_mm
-            self.impact_panel.set_dpa_preview(
-                damage.projected_damage_area_mm2, A_panel
-            )
+            self.impact_panel.set_dpa_preview(damage.projected_damage_area_mm2, A_panel)
         except Exception:
             # Any malformed intermediate state during typing — just blank both.
             self.impact_panel.onset_label.setText("E_onset: \u2014 J")
@@ -615,8 +613,7 @@ class BvidMainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage(
-                f"Tier comparison complete: {len(energies)} energies x "
-                f"{len(kd_by_tier)} tiers",
+                f"Tier comparison complete: {len(energies)} energies x " f"{len(kd_by_tier)} tiers",
                 8000,
             )
 

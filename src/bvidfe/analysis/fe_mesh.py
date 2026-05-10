@@ -141,7 +141,6 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
         ply_thicknesses = [float(t) for t in raw_t]
     else:
         ply_thicknesses = [float(raw_t)] * n_plies
-    Lz = float(sum(ply_thicknesses))
     # Ply boundary z-coordinates (n_plies + 1 entries) and the z position of
     # the top of each ply, used both for the node grid and for delamination
     # interface lookup.
@@ -233,9 +232,7 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
                         dy = cy - ell.centroid_mm[1]
                         if math.sqrt(dx * dx + dy * dy) <= damage.fiber_break_radius_mm:
                             damage_factors[elem_idx] = DAMAGE_OOP_FACTOR
-                            in_plane_damage_factors[elem_idx] = (
-                                DAMAGE_FIBER_BREAK_INPLANE_FACTOR
-                            )
+                            in_plane_damage_factors[elem_idx] = DAMAGE_FIBER_BREAK_INPLANE_FACTOR
                             break
 
                 elem_idx += 1

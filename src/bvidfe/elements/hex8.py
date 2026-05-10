@@ -26,8 +26,9 @@ class DegenerateElementError(ValueError):
     """
 
 
-def _validate_jacobian(detJ: float, xi: float, eta: float, zeta: float,
-                       node_coords: np.ndarray) -> None:
+def _validate_jacobian(
+    detJ: float, xi: float, eta: float, zeta: float, node_coords: np.ndarray
+) -> None:
     """Raise DegenerateElementError if the Jacobian determinant is non-positive.
 
     A non-positive ``detJ`` means the element is either inverted (negative
@@ -43,6 +44,7 @@ def _validate_jacobian(detJ: float, xi: float, eta: float, zeta: float,
             f"natural coords (xi, eta, zeta)=({xi:g}, {eta:g}, {zeta:g}). "
             f"Node coordinates: {node_coords.tolist()}."
         )
+
 
 # Node natural coordinates (xi, eta, zeta)
 _NODE_COORDS = np.array(

@@ -1,3 +1,5 @@
+import pytest
+
 from bvidfe.core.material import MATERIAL_LIBRARY
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_strength_uniaxial
 

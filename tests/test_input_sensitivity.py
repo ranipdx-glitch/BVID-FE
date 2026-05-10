@@ -18,9 +18,8 @@ from bvidfe.analysis import AnalysisConfig, BvidAnalysis, MeshParams
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import MATERIAL_LIBRARY
-from bvidfe.impact.mapping import ImpactEvent, impact_to_damage
+from bvidfe.impact.mapping import ImpactEvent
 from bvidfe.impact.olsson import onset_energy
-
 
 MAT = "IM7/8552"
 LAYUP = [0, 45, -45, 90, 90, -45, 45, 0]
@@ -88,12 +87,8 @@ def test_boundary_changes_semi_analytical_knockdown():
     conditions. The combined effect is dominated by the sublaminate
     buckling coefficient (clamped ~ 1.9x SSSS), so clamped panels produce
     a higher residual strength / higher KD than simply-supported."""
-    kd_ss = _run_kd(
-        _cfg(panel=PanelGeometry(300, 200, "simply_supported"), tier="semi_analytical")
-    )
-    kd_cl = _run_kd(
-        _cfg(panel=PanelGeometry(300, 200, "clamped"), tier="semi_analytical")
-    )
+    kd_ss = _run_kd(_cfg(panel=PanelGeometry(300, 200, "simply_supported"), tier="semi_analytical"))
+    kd_cl = _run_kd(_cfg(panel=PanelGeometry(300, 200, "clamped"), tier="semi_analytical"))
     assert kd_cl != kd_ss, (kd_ss, kd_cl)
     assert kd_cl > kd_ss, (kd_ss, kd_cl)
 
@@ -104,12 +99,9 @@ def test_boundary_changes_semi_analytical_knockdown():
 def test_shape_changes_dpa_and_knockdown():
     """Flat-ended impactors produce larger delamination footprints than
     hemispherical (more spread); conical less (concentrated penetration)."""
+
     def make(shape):
-        return _cfg(
-            impact=ImpactEvent(
-                20.0, ImpactorGeometry(16.0, shape=shape), mass_kg=5.5
-            )
-        )
+        return _cfg(impact=ImpactEvent(20.0, ImpactorGeometry(16.0, shape=shape), mass_kg=5.5))
 
     kd_hemi = _run_kd(make("hemispherical"))
     kd_flat = _run_kd(make("flat"))
@@ -127,10 +119,9 @@ def test_mass_changes_dpa_centered_on_reference():
     """At the 5.5 kg reference the mass correction is unity; lighter
     impactors give slightly more damage (higher DPA, lower KD); heavier
     give slightly less."""
+
     def make(mass):
-        return _cfg(
-            impact=ImpactEvent(20.0, ImpactorGeometry(), mass_kg=mass)
-        )
+        return _cfg(impact=ImpactEvent(20.0, ImpactorGeometry(), mass_kg=mass))
 
     kd_ref = _run_kd(make(5.5))
     kd_light = _run_kd(make(1.0))
@@ -144,6 +135,7 @@ def test_mass_changes_dpa_centered_on_reference():
 
 def test_diameter_changes_dpa_via_spread_factor():
     """Smaller impactors concentrate damage → larger DPA → lower KD."""
+
     def make(d):
         return _cfg(impact=ImpactEvent(20.0, ImpactorGeometry(diameter_mm=d), mass_kg=5.5))
 
@@ -167,7 +159,7 @@ def test_fe3d_knockdown_mostly_decreases_with_energy():
     lets damaged elements carry realistic in-plane stress so the failure
     criterion can flag them.
     """
-    from bvidfe.analysis import AnalysisConfig, BvidAnalysis, MeshParams
+    from bvidfe.analysis import AnalysisConfig, BvidAnalysis
     from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
     from bvidfe.impact.mapping import ImpactEvent
 
