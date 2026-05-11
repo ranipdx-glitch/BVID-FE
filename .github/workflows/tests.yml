@@ -19,15 +19,29 @@ jobs:
       # ``ImportError: libEGL.so.1`` and pytest-qt's plugin load fails before
       # any test runs (exit code 4). macOS and Windows wheels bundle their own
       # Qt6 frameworks.
+      #
+      # VTK (pulled in by pyvista) additionally needs Mesa's software GLX
+      # driver and a working DISPLAY socket, even when pyvista is set to
+      # OFF_SCREEN — vtkRenderingOpenGL2 calls glXQueryVersion at module load
+      # and aborts (SIGABRT, exit 134) if the X server isn't reachable.
+      # libgl1-mesa-dri + libglx-mesa0 provide the software renderer; xvfb
+      # provides the headless X server we wrap pytest in below.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libxcb-cursor0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libxcb-cursor0 \
+            libxkbcommon-x11-0 libgl1-mesa-dri libglx-mesa0 xvfb
       # Install the gui extras alongside dev so pytest-qt has a Qt binding —
       # otherwise pytest aborts at startup with "pytest-qt requires either
       # PySide6, PyQt5 or PyQt6 installed."
       - run: pip install -e ".[all]"
       - run: ruff check src tests
       - run: black --check src tests
-      - run: pytest -v
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a --server-args="-screen 0 1024x768x24" pytest -v
+      - if: runner.os != 'Linux'
+        run: pytest -v
 
   validation:
     runs-on: ubuntu-latest
