@@ -19,8 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PyQt6>=6.5,<7", "pyvista>=0.42,<1", "pyvistaqt>=0.11,<1"]
-dev = ["pytest>=7,<9", "pytest-qt>=4.3,<5", "ruff>=0.5,<1", "black>=24,<26"]
+gui = ["PyQt6>=6.5,<7", "pyvista>=0.42,<1", "pyvistaqt>=0.11,<1", "pytest-qt>=4.3,<5"]
+dev = ["pytest>=7,<9", "ruff>=0.5,<1", "black>=24,<26"]
 all = ["bvidfe[gui,dev]"]
 
 [project.scripts]
