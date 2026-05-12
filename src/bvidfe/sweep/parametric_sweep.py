@@ -25,6 +25,7 @@ aborted mid-run.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import warnings
 from dataclasses import replace
@@ -97,6 +98,21 @@ def _emit_progress(cb: Optional[_ProgressCallback], i: int, n: int) -> None:
         cb(i, n)
 
 
+@contextlib.contextmanager
+def _dedup_physical_regime_warnings():
+    """Show each physical-regime warning once per sweep, not once per iteration.
+
+    See ``bvidfe.impact.mapping.SmallMassQuasiStaticWarning`` and
+    ``DPACapClipWarning``.
+    """
+    from bvidfe.impact.mapping import DPACapClipWarning, SmallMassQuasiStaticWarning
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("once", category=SmallMassQuasiStaticWarning)
+        warnings.simplefilter("once", category=DPACapClipWarning)
+        yield
+
+
 def sweep_energies(
     base_cfg: AnalysisConfig,
     energies_J: Sequence[float],
@@ -113,13 +129,14 @@ def sweep_energies(
         raise ValueError("sweep_energies requires base_cfg.impact to be set")
     rows: List[dict] = []
     n = len(energies_J)
-    for i, E in enumerate(energies_J):
-        new_impact = replace(base_cfg.impact, energy_J=float(E))
-        cfg = replace(base_cfg, impact=new_impact)
-        row = _try_run_one(cfg, on_error, f"energy_J={float(E):g}")
-        row["energy_J"] = float(E)
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedup_physical_regime_warnings():
+        for i, E in enumerate(energies_J):
+            new_impact = replace(base_cfg.impact, energy_J=float(E))
+            cfg = replace(base_cfg, impact=new_impact)
+            row = _try_run_one(cfg, on_error, f"energy_J={float(E):g}")
+            row["energy_J"] = float(E)
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = pd.DataFrame(rows)
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -136,13 +153,14 @@ def sweep_layups(
     """Sweep layup sequences."""
     rows: List[dict] = []
     n = len(layups)
-    for i, layup in enumerate(layups):
-        cfg = replace(base_cfg, layup_deg=list(layup))
-        layup_str = "/".join(f"{a:g}" for a in layup)
-        row = _try_run_one(cfg, on_error, f"layup={layup_str}")
-        row["layup"] = layup_str
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedup_physical_regime_warnings():
+        for i, layup in enumerate(layups):
+            cfg = replace(base_cfg, layup_deg=list(layup))
+            layup_str = "/".join(f"{a:g}" for a in layup)
+            row = _try_run_one(cfg, on_error, f"layup={layup_str}")
+            row["layup"] = layup_str
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = pd.DataFrame(rows)
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -159,12 +177,13 @@ def sweep_thicknesses(
     """Sweep ply thickness values."""
     rows: List[dict] = []
     n = len(ply_thicknesses_mm)
-    for i, t in enumerate(ply_thicknesses_mm):
-        cfg = replace(base_cfg, ply_thickness_mm=float(t))
-        row = _try_run_one(cfg, on_error, f"ply_thickness_mm={float(t):g}")
-        row["ply_thickness_mm"] = float(t)
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedup_physical_regime_warnings():
+        for i, t in enumerate(ply_thicknesses_mm):
+            cfg = replace(base_cfg, ply_thickness_mm=float(t))
+            row = _try_run_one(cfg, on_error, f"ply_thickness_mm={float(t):g}")
+            row["ply_thickness_mm"] = float(t)
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = pd.DataFrame(rows)
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df

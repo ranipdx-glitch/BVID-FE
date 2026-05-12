@@ -33,6 +33,9 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import lru_cache
+
+import numpy as np
 
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
@@ -59,6 +62,36 @@ _BOUNDARY_BENDING_FACTOR: dict[str, float] = {
 _CONICAL_HALF_ANGLE_DEG: float = 30.0
 
 
+@lru_cache(maxsize=32)
+def _navier_basis_ssss(
+    a: float, b: float, x0: float, y0: float, n_modes: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Precompute the Navier series basis for the SSSS point-load Green's
+    function. Pure function of panel + location + mode count — cached so a
+    sweep that holds geometry fixed pays this cost once instead of per call.
+
+    Returns
+    -------
+    sin2_outer : np.ndarray
+        Shape ``(n_modes, n_modes)``. ``sin^2(m*pi*x0/a) * sin^2(n*pi*y0/b)``.
+    kx2 : np.ndarray
+        Shape ``(n_modes,)``. ``(m*pi/a)^2`` for m = 1..n_modes.
+    ky2 : np.ndarray
+        Shape ``(n_modes,)``. ``(n*pi/b)^2`` for n = 1..n_modes.
+    norm : np.ndarray
+        Shape ``(1,)``. The ``4 / (a*b)`` Navier normalisation factor.
+    """
+    m = np.arange(1, n_modes + 1, dtype=np.float64)
+    n = np.arange(1, n_modes + 1, dtype=np.float64)
+    sin2_m = np.sin(m * np.pi * x0 / a) ** 2  # (n_modes,)
+    sin2_n = np.sin(n * np.pi * y0 / b) ** 2  # (n_modes,)
+    sin2_outer = np.outer(sin2_m, sin2_n)
+    kx2 = (m * np.pi / a) ** 2
+    ky2 = (n * np.pi / b) ** 2
+    norm = np.array([4.0 / (a * b)])
+    return sin2_outer, kx2, ky2, norm
+
+
 def _k_bending_ssss(
     lam: Laminate,
     pan: PanelGeometry,
@@ -76,19 +109,14 @@ def _k_bending_ssss(
     """
     _, _, D = lam.abd_matrices()
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
-    a, b = pan.Lx_mm, pan.Ly_mm
-    w_over_P = 0.0
-    for m in range(1, n_modes + 1):
-        for n in range(1, n_modes + 1):
-            sin_mx = math.sin(m * math.pi * x0 / a)
-            sin_ny = math.sin(n * math.pi * y0 / b)
-            Dmn = (
-                D11 * (m * math.pi / a) ** 4
-                + 2 * (D12 + 2 * D66) * (m * math.pi / a) ** 2 * (n * math.pi / b) ** 2
-                + D22 * (n * math.pi / b) ** 4
-            )
-            w_over_P += (sin_mx * sin_ny) ** 2 / Dmn
-    w_over_P *= 4.0 / (a * b)
+    sin2_outer, kx2, ky2, norm = _navier_basis_ssss(pan.Lx_mm, pan.Ly_mm, x0, y0, n_modes)
+    # D_mn = D11*kx^4 + 2*(D12+2*D66)*kx^2*ky^2 + D22*ky^4 (outer product).
+    Dmn = (
+        D11 * (kx2**2)[:, None]
+        + 2.0 * (D12 + 2.0 * D66) * np.outer(kx2, ky2)
+        + D22 * (ky2**2)[None, :]
+    )
+    w_over_P = float(norm[0] * np.sum(sin2_outer / Dmn))
     return 1.0 / w_over_P
 
 

@@ -56,6 +56,59 @@ def test_B_matrix_shape():
     assert detJ > 0
 
 
+@pytest.mark.parametrize(
+    "voigt_idx, build_u",
+    [
+        # e_xx: u_x = eps * x, u_y = u_z = 0
+        (0, lambda nodes, eps: _packed(eps * nodes[:, 0], 0 * nodes[:, 0], 0 * nodes[:, 0])),
+        # e_yy: u_y = eps * y
+        (1, lambda nodes, eps: _packed(0 * nodes[:, 0], eps * nodes[:, 1], 0 * nodes[:, 0])),
+        # e_zz: u_z = eps * z
+        (2, lambda nodes, eps: _packed(0 * nodes[:, 0], 0 * nodes[:, 0], eps * nodes[:, 2])),
+        # 2*e_yz (engineering gamma_yz): u_y = eps*z, u_z = eps*y -> e_yz = eps,
+        # so the Voigt entry 3 carries 2*e_yz = 2*eps.
+        (3, lambda nodes, eps: _packed(0 * nodes[:, 0], eps * nodes[:, 2], eps * nodes[:, 1])),
+        # 2*e_xz: u_x = eps*z, u_z = eps*x -> Voigt entry 4 = 2*eps.
+        (4, lambda nodes, eps: _packed(eps * nodes[:, 2], 0 * nodes[:, 0], eps * nodes[:, 0])),
+        # 2*e_xy: u_x = eps*y, u_y = eps*x -> Voigt entry 5 = 2*eps.
+        (5, lambda nodes, eps: _packed(eps * nodes[:, 1], eps * nodes[:, 0], 0 * nodes[:, 0])),
+    ],
+)
+def test_B_matrix_passes_constant_strain_patch_test(voigt_idx, build_u):
+    """Issue #47: B @ u must reproduce the imposed uniform Voigt strain at
+    every Gauss point. Foundational FE correctness — a B-matrix bug here
+    would silently corrupt every stress recovery downstream.
+    """
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    elem = Hex8Element(_unit_cube_nodes(), m)
+    eps = 1e-3
+    u_elem = build_u(_unit_cube_nodes(), eps)
+    expected = np.zeros(6)
+    # Indices 0..2 are direct strains -> magnitude eps; indices 3..5 are
+    # engineering shears (2*epsilon_ij) -> magnitude 2*eps.
+    expected[voigt_idx] = eps if voigt_idx < 3 else 2 * eps
+
+    gp_coords = [
+        (xi, eta, zeta)
+        for xi in (-1 / np.sqrt(3), 1 / np.sqrt(3))
+        for eta in (-1 / np.sqrt(3), 1 / np.sqrt(3))
+        for zeta in (-1 / np.sqrt(3), 1 / np.sqrt(3))
+    ]
+    for xi, eta, zeta in gp_coords:
+        B, _ = elem.B_matrix(xi, eta, zeta)
+        strain = B @ u_elem
+        np.testing.assert_allclose(strain, expected, atol=1e-12)
+
+
+def _packed(ux, uy, uz):
+    """Interleave per-node (ux, uy, uz) into the 24-vector layout B expects."""
+    out = np.empty(24)
+    out[0::3] = ux
+    out[1::3] = uy
+    out[2::3] = uz
+    return out
+
+
 def test_stiffness_matrix_shape_and_symmetry():
     m = MATERIAL_LIBRARY["IM7/8552"]
     elem = Hex8Element(_unit_cube_nodes(), m)

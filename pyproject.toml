@@ -23,12 +23,21 @@ gui = ["PyQt6>=6.5,<7", "pyvista>=0.42,<1", "pyvistaqt>=0.11,<1", "pytest-qt>=4.
 dev = ["pytest>=7,<9", "ruff>=0.5,<1", "black>=24,<26"]
 all = ["bvidfe[gui,dev]"]
 
+[project.urls]
+Homepage = "https://github.com/ranipdx-glitch/BVID-FE"
+Issues = "https://github.com/ranipdx-glitch/BVID-FE/issues"
+Changelog = "https://github.com/ranipdx-glitch/BVID-FE/blob/main/CHANGELOG.md"
+Repository = "https://github.com/ranipdx-glitch/BVID-FE"
+
 [project.scripts]
 bvidfe = "bvidfe.cli:main"
 bvidfe-gui = "bvidfe.gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+bvidfe = ["py.typed"]
 
 [tool.black]
 line-length = 100

@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bvidfe",
         description="BVID-FE: Barely Visible Impact Damage residual-strength analysis.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
         "--version",

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import scipy.sparse as sp
 
 from bvidfe.core.material import MATERIAL_LIBRARY
@@ -89,17 +90,42 @@ def test_assemble_six_rigid_body_modes():
 
 
 def test_assemble_summation_of_overlapping_dofs():
-    """Shared face DOFs should sum contributions from both elements."""
+    """Shared-DOF entries in K must equal the sum of each element's local
+    contribution — issue #48. A regression that overwrites instead of
+    accumulates (e.g. CSR construction that dedups duplicate (row, col)
+    pairs) would still produce a positive-definite K, so the previous
+    eigenvalue-only check was insufficient.
+    """
     elems, dofs, n_dof = _two_element_system()
-    K = assemble_global_stiffness(elems, dofs, n_dof)
-    # Node 1 is shared; K[3,3] should include contributions from both elements
-    # We can't easily check the exact value, but K should be positive-definite on the constrained system
-    Kd = K.toarray()
-    free = list(range(n_dof))
-    # Fix 6 DOFs to remove rigid-body modes
-    fixed = [0, 1, 2, 4, 5, 11]  # arbitrary but enough
-    for f in sorted(fixed, reverse=True):
-        free.remove(f)
-    Krr = Kd[np.ix_(free, free)]
-    eigs = np.linalg.eigvalsh(Krr)
-    assert eigs.min() > 0
+    K = assemble_global_stiffness(elems, dofs, n_dof).toarray()
+
+    elem1, elem2 = elems
+    K1, K2 = elem1.stiffness_matrix(), elem2.stiffness_matrix()
+    dof1, dof2 = dofs
+
+    # Pick a global DOF that is shared by both elements (node 1 -> x DOF = 3).
+    shared_global_dof = 3
+    loc1 = int(np.where(dof1 == shared_global_dof)[0][0])
+    loc2 = int(np.where(dof2 == shared_global_dof)[0][0])
+
+    # Diagonal entry must sum.
+    assert K[shared_global_dof, shared_global_dof] == pytest.approx(
+        K1[loc1, loc1] + K2[loc2, loc2], rel=1e-12
+    )
+
+    # Off-diagonal between two DOFs shared by both elements must also sum.
+    # Node 1 x-DOF -> global 3; node 2 x-DOF -> global 6 (both shared).
+    other_global_dof = 6
+    loc1b = int(np.where(dof1 == other_global_dof)[0][0])
+    loc2b = int(np.where(dof2 == other_global_dof)[0][0])
+    assert K[shared_global_dof, other_global_dof] == pytest.approx(
+        K1[loc1, loc1b] + K2[loc2, loc2b], rel=1e-12
+    )
+
+    # Entry for a DOF in element 1 only must NOT include any element-2
+    # contribution (sanity-check that the summation is targeted).
+    elem1_only_global_dof = 0  # node 0 x-DOF, not in element 2
+    loc1c = int(np.where(dof1 == elem1_only_global_dof)[0][0])
+    assert K[elem1_only_global_dof, elem1_only_global_dof] == pytest.approx(
+        K1[loc1c, loc1c], rel=1e-12
+    )
