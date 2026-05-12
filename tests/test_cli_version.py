@@ -36,7 +36,9 @@ def test_cli_cscan_flag_runs_inspection_driven():
     """--cscan runs the inspection-driven path from CLI (mutually exclusive with --energy)."""
     res = subprocess.run(
         [
-            sys.executable, "-m", "bvidfe.cli",
+            sys.executable,
+            "-m",
+            "bvidfe.cli",
             "--material",
             "IM7/8552",
             "--layup",
@@ -66,7 +68,9 @@ def test_cli_rejects_energy_and_cscan_together():
     """--energy and --cscan are mutually exclusive."""
     res = subprocess.run(
         [
-            sys.executable, "-m", "bvidfe.cli",
+            sys.executable,
+            "-m",
+            "bvidfe.cli",
             "--material",
             "IM7/8552",
             "--layup",
@@ -94,7 +98,9 @@ def test_cli_quick_flag_prints_only_knockdown():
     """--quick prints just the knockdown as a scalar, no JSON."""
     res = subprocess.run(
         [
-            sys.executable, "-m", "bvidfe.cli",
+            sys.executable,
+            "-m",
+            "bvidfe.cli",
             "--material",
             "IM7/8552",
             "--layup",

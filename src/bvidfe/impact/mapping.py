@@ -14,7 +14,6 @@ Pipeline:
 
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import dataclass, field
 from typing import Tuple
@@ -25,7 +24,6 @@ from bvidfe.damage.state import DamageState
 from bvidfe.impact.dent_model import dent_depth_mm, fiber_break_radius_mm
 from bvidfe.impact.olsson import onset_energy
 from bvidfe.impact.shape_templates import distribute_damage
-
 
 # Impactor-shape footprint multiplier on target DPA. Empirical: flat-ended
 # impactors spread the contact force over a larger area and produce wider

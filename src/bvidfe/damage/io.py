@@ -51,9 +51,7 @@ def _require_finite_number(value: Any, label: str) -> float:
     and return it as a float. Raises ``CScanSchemaError`` on every failure
     mode so callers see a uniform error type."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise CScanSchemaError(
-            f"{label} must be a number (got {type(value).__name__}: {value!r})"
-        )
+        raise CScanSchemaError(f"{label} must be a number (got {type(value).__name__}: {value!r})")
     f = float(value)
     if not math.isfinite(f):
         raise CScanSchemaError(f"{label} must be finite (got {f})")
@@ -75,8 +73,7 @@ def _validate_dict(data: Dict[str, Any]) -> None:
     unknown = set(data) - _TOP_LEVEL_KEYS
     if unknown:
         warnings.warn(
-            f"C-scan JSON contains unknown top-level field(s): {sorted(unknown)}; "
-            "ignoring",
+            f"C-scan JSON contains unknown top-level field(s): {sorted(unknown)}; " "ignoring",
             stacklevel=3,
         )
     if "dent_depth_mm" not in data:
@@ -87,16 +84,13 @@ def _validate_dict(data: Dict[str, Any]) -> None:
     if "fiber_break_radius_mm" in data:
         fbr = _require_finite_number(data["fiber_break_radius_mm"], "fiber_break_radius_mm")
         if fbr < 0:
-            raise CScanSchemaError(
-                f"fiber_break_radius_mm must be >= 0 (got {fbr})"
-            )
+            raise CScanSchemaError(f"fiber_break_radius_mm must be >= 0 (got {fbr})")
     if "delaminations" not in data or not isinstance(data["delaminations"], list):
         raise CScanSchemaError("delaminations must be a list")
     for i, d in enumerate(data["delaminations"]):
         if not isinstance(d, dict):
             raise CScanSchemaError(
-                f"delaminations[{i}] must be an object "
-                f"(got {type(d).__name__}: {d!r})"
+                f"delaminations[{i}] must be an object " f"(got {type(d).__name__}: {d!r})"
             )
         for k in _DELAMINATION_KEYS:
             if k not in d:
@@ -122,9 +116,7 @@ def _validate_dict(data: Dict[str, Any]) -> None:
             )
         if iface < 0:
             raise CScanSchemaError(f"delaminations[{i}].interface_index must be >= 0")
-        _require_finite_number(
-            d["orientation_deg"], f"delaminations[{i}].orientation_deg"
-        )
+        _require_finite_number(d["orientation_deg"], f"delaminations[{i}].orientation_deg")
         c = d["centroid_mm"]
         if not (isinstance(c, (list, tuple)) and len(c) == 2):
             raise CScanSchemaError(f"delaminations[{i}].centroid_mm must be [x, y]")

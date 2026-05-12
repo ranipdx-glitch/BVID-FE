@@ -1,6 +1,7 @@
 """Smoke tests for the validation harness."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -28,7 +29,7 @@ def test_validator_module_imports():
 def test_validator_runs_synthetic_dataset():
     res = subprocess.run(
         [
-            "./.venv/bin/python",
+            sys.executable,
             "validation/validate_bvid_public.py",
             "--dataset",
             "synthetic_selfcheck",
@@ -45,7 +46,7 @@ def test_validator_runs_synthetic_dataset():
 def test_validator_gate_passes_on_synthetic_dataset():
     res = subprocess.run(
         [
-            "./.venv/bin/python",
+            sys.executable,
             "validation/validate_bvid_public.py",
             "--dataset",
             "synthetic_selfcheck",

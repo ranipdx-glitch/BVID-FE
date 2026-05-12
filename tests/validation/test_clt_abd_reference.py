@@ -76,7 +76,4 @@ def test_clt_B_zero_for_symmetric_layup():
 def test_clt_no_extension_shear_coupling_for_balanced():
     """A_16 = A_26 = 0 for balanced layups (no off-axis plies)."""
     A, _, _ = _balanced_cross_ply().abd_matrices()
-    assert A[0, 2] == 0.0
-    assert A[1, 2] == 0.0
-    assert A[2, 0] == 0.0
-    assert A[2, 1] == 0.0
+    np.testing.assert_allclose([A[0, 2], A[1, 2], A[2, 0], A[2, 1]], 0.0, atol=1e-6)

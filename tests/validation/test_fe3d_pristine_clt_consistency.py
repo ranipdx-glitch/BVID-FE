@@ -126,9 +126,9 @@ def test_pristine_fe3d_recovers_clt_extensional_modulus(fe3d_setup):
     # 10% tolerance on a coarse 5x4x4 brick mesh is generous but
     # appropriate; CLT is exact, FE has Hex8 trilinear discretisation
     # error of ~5% at this resolution.
-    assert E_x_fe == pytest.approx(E_x_clt, rel=0.10), (
-        f"E_x_FE = {E_x_fe:.1f} MPa, E_x_CLT = {E_x_clt:.1f} MPa"
-    )
+    assert E_x_fe == pytest.approx(
+        E_x_clt, rel=0.10
+    ), f"E_x_FE = {E_x_fe:.1f} MPa, E_x_CLT = {E_x_clt:.1f} MPa"
 
 
 def test_pristine_static_solve_completes_without_warnings(fe3d_setup):

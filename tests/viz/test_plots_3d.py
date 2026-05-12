@@ -1,4 +1,6 @@
-import pyvista as pv
+import pytest
+
+pv = pytest.importorskip("pyvista")
 
 pv.OFF_SCREEN = True
 

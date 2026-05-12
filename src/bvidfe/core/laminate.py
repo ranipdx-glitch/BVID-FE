@@ -21,7 +21,6 @@ import numpy as np
 
 from bvidfe.core.material import OrthotropicMaterial
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

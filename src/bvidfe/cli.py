@@ -23,9 +23,7 @@ def _parse_panel(spec: str) -> PanelGeometry:
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"--panel must be '<Lx>x<Ly>' (got {spec!r})") from exc
     if Lx <= 0 or Ly <= 0:
-        raise argparse.ArgumentTypeError(
-            f"--panel dimensions must be positive (got {Lx}x{Ly})"
-        )
+        raise argparse.ArgumentTypeError(f"--panel dimensions must be positive (got {Lx}x{Ly})")
     return PanelGeometry(Lx_mm=Lx, Ly_mm=Ly)
 
 

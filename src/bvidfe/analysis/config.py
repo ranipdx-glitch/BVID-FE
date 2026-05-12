@@ -27,8 +27,7 @@ class MeshParams:
             )
         if not (self.in_plane_size_mm > 0):
             raise ValueError(
-                f"MeshParams.in_plane_size_mm must be > 0 "
-                f"(got {self.in_plane_size_mm!r})"
+                f"MeshParams.in_plane_size_mm must be > 0 " f"(got {self.in_plane_size_mm!r})"
             )
         if not (self.cohesive_zone_factor > 0):
             raise ValueError(

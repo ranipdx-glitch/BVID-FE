@@ -76,9 +76,7 @@ def larc05_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
     return max(modes)
 
 
-def larc05_index_batch(
-    m: OrthotropicMaterial, stresses: np.ndarray
-) -> np.ndarray:
+def larc05_index_batch(m: OrthotropicMaterial, stresses: np.ndarray) -> np.ndarray:
     """Vectorised LaRC05 failure index across a batch of Voigt-6 stresses.
 
     Equivalent to ``np.array([larc05_index(m, s) for s in stresses])`` but

@@ -204,9 +204,7 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
                         dy = cy - ell.centroid_mm[1]
                         if math.sqrt(dx * dx + dy * dy) <= damage.fiber_break_radius_mm:
                             damage_factors[elem_idx] = DAMAGE_OOP_FACTOR
-                            in_plane_damage_factors[elem_idx] = (
-                                DAMAGE_FIBER_BREAK_INPLANE_FACTOR
-                            )
+                            in_plane_damage_factors[elem_idx] = DAMAGE_FIBER_BREAK_INPLANE_FACTOR
                             break
 
                 elem_idx += 1

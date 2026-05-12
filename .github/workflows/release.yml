@@ -39,15 +39,19 @@ jobs:
 
       - name: Build macOS app
         if: runner.os == 'macOS'
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
         run: |
           pyinstaller BvidFE.spec --noconfirm --clean
-          cd dist && zip -r BVID-FE-${{ github.event.inputs.release_tag || github.ref_name }}-macOS.zip BVID-FE.app
+          cd dist && zip -r "BVID-FE-${RELEASE_TAG}-macOS.zip" BVID-FE.app
 
       - name: Build Windows app
         if: runner.os == 'Windows'
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
         run: |
           pyinstaller BvidFE.spec --noconfirm --clean
-          cd dist && 7z a BVID-FE-${{ github.event.inputs.release_tag || github.ref_name }}-Windows.zip BVID-FE
+          cd dist && 7z a "BVID-FE-${env:RELEASE_TAG}-Windows.zip" BVID-FE
 
       - name: Create release and upload artifact
         uses: softprops/action-gh-release@v2

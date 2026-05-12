@@ -6,6 +6,7 @@ quasi-static validity, and the known fe3d energy-insensitivity limitation.
 The underlying Python-API warnings emit to stderr; these notices surface
 them into the GUI where the user can actually see them.
 """
+
 from __future__ import annotations
 
 import os
@@ -13,7 +14,6 @@ import warnings
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import pytest
 
 from bvidfe.analysis import AnalysisConfig, BvidAnalysis, MeshParams
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
@@ -23,9 +23,7 @@ from bvidfe.gui.tabs.summary_tab import SummaryTab
 
 def _run(**overrides):
     panel = overrides.pop("panel", PanelGeometry(150, 100))
-    impact = overrides.pop(
-        "impact", ImpactEvent(10.0, ImpactorGeometry(), mass_kg=5.5)
-    )
+    impact = overrides.pop("impact", ImpactEvent(10.0, ImpactorGeometry(), mass_kg=5.5))
     kw = dict(
         material="IM7/8552",
         layup_deg=[0, 45, -45, 90, 90, -45, 45, 0],

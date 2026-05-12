@@ -116,9 +116,7 @@ def plot_damage_map(
                         edgecolor="darkred",
                         linewidth=1.0,
                         zorder=9,
-                        label="fiber break"
-                        if (cx, cy) == next(iter(unique_centroids))
-                        else None,
+                        label="fiber break" if (cx, cy) == next(iter(unique_centroids)) else None,
                     )
                 )
         ax.legend(loc="upper right", framealpha=0.85)

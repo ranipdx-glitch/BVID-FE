@@ -28,9 +28,7 @@ def small_cfg():
 def test_fe3d_cai_buckling_returns_positive_strength(small_cfg):
     lam = Laminate(MATERIAL_LIBRARY["IM7/8552"], small_cfg.layup_deg, small_cfg.ply_thickness_mm)
     damage = DamageState([], dent_depth_mm=0.0)
-    sigma, lambda_crit, notes = fe3d_cai_buckling(
-        small_cfg, damage, lam, sigma_pristine_MPa=500.0
-    )
+    sigma, lambda_crit, notes = fe3d_cai_buckling(small_cfg, damage, lam, sigma_pristine_MPa=500.0)
     assert sigma > 0
     assert lambda_crit > 0
     # Clean solve on a pristine input should not generate any diagnostic notes.

@@ -93,9 +93,7 @@ def tsai_wu_index(m: OrthotropicMaterial, stress: Sequence[float]) -> float:
     return float(F.dot(s) + s.dot(Q.dot(s)))
 
 
-def tsai_wu_index_batch(
-    m: OrthotropicMaterial, stresses: np.ndarray
-) -> np.ndarray:
+def tsai_wu_index_batch(m: OrthotropicMaterial, stresses: np.ndarray) -> np.ndarray:
     """Vectorised Tsai-Wu failure index across a batch of Voigt-6 stresses.
 
     Equivalent to ``np.array([tsai_wu_index(m, s) for s in stresses])`` but
