@@ -2,22 +2,24 @@
 
 The CI workflow already starts ``Xvfb :99`` explicitly before pytest and
 exports ``DISPLAY=:99`` (see ``.github/workflows/tests.yml``). This
-session-scoped autouse fixture is an additional safety net:
+session-scoped autouse fixture is an additional safety net for local
+developers (and any CI variant) that haven't pre-started Xvfb:
 
-- On Linux, it calls ``pyvista.start_xvfb()`` so a developer or a CI
-  variant that hasn't pre-started Xvfb still gets a usable display
-  before VTK's ``vtkRenderingOpenGL2`` module probes GLX (which
-  SIGABRTs the process if the X socket isn't reachable).
-- ``pyvista.start_xvfb()`` is a no-op-equivalent when Xvfb is already
-  running on display :99: the second Xvfb invocation silently fails to
-  bind, the existing display continues to serve, and pyvista sets
-  ``DISPLAY=:99`` (already set by CI).
-- On macOS and Windows the fixture is skipped — those platforms render
-  through native frameworks and don't need an X server.
+- If ``DISPLAY`` is already set (CI's normal path), do nothing — the
+  pre-existing X server is what we want VTK to talk to. Calling
+  ``pyvista.start_xvfb()`` on top of an already-running Xvfb on :99
+  was observed to race and SIGABRT the python process on
+  ubuntu-latest 3.12, presumably because pyvista's helper spawns a
+  second Xvfb that fights the first one for the display socket.
+- If ``DISPLAY`` is unset and we're on Linux, ask pyvista to start
+  Xvfb so VTK's ``vtkRenderingOpenGL2`` module load doesn't abort.
+- On macOS and Windows, do nothing — those platforms render through
+  native frameworks and don't need an X server.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -29,12 +31,14 @@ def _ensure_xvfb_for_vtk():
     if not sys.platform.startswith("linux"):
         yield
         return
-    try:
-        import pyvista
-    except ImportError:
+    if os.environ.get("DISPLAY"):
+        # CI workflow (or a developer's existing session) already provides
+        # an X display — don't fight over it.
         yield
         return
     try:
+        import pyvista
+
         pyvista.start_xvfb()
     except Exception:
         # If Xvfb isn't installed or the helper raises for any reason,
