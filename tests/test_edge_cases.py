@@ -173,6 +173,8 @@ def test_cli_runs_end_to_end():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     assert res.returncode == 0, res.stderr

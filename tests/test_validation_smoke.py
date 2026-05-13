@@ -36,6 +36,8 @@ def test_validator_runs_synthetic_dataset():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     assert res.returncode == 0, res.stderr
@@ -54,6 +56,8 @@ def test_validator_gate_passes_on_synthetic_dataset():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     assert res.returncode == 0, res.stderr

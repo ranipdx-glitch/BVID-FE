@@ -13,6 +13,8 @@ def _run_cli(*args):
         [sys.executable, "-m", "bvidfe.cli", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
