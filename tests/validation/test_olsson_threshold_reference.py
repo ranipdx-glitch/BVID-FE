@@ -84,23 +84,23 @@ def test_threshold_load_invariant_to_panel_size():
     assert Pc_small == pytest.approx(Pc_large, rel=1e-12)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Empirical ratio is ~2.65 vs theoretical 2^{3/2}=2.83 (~6.5% off). "
-        "Either Pc has a sub-h^{3/2} contribution from the ply-by-ply "
-        "Q_bar→D_eff path, or the test's 1% tolerance is too tight for the "
-        "discrete-stack case. Needs maintainer review of model vs scaling law."
-    ),
-    strict=True,
-)
 def test_threshold_load_scales_with_thickness_to_the_three_halves():
-    """Doubling the layup count (same material, same angles) raises h
-    by the layup-count factor; D_eff scales as h^3, Pc as h^{3/2}."""
+    """Pc ~ h^{3/2} under *homogeneous* thickness scaling (exact CLT).
+
+    Pc = pi*sqrt(8*G_IIc*D_eff/9) with D_eff = sqrt(D11*D22), and the D
+    matrix is sum_k Qbar_k*(z_k^3 - z_{k-1}^3)/3. The h^3 (hence Pc ~ h^{3/2})
+    law is exact ONLY when the through-thickness Qbar(z) distribution is
+    preserved under scaling — i.e. the SAME layup with thicker plies. It is
+    NOT a property of "doubling the ply count": [0,45,-45,90]*2 is a
+    different stacking sequence (the 0 ply moves off the surface), so its
+    D_eff/h^3 is not unity (here D_eff ratio ~7.0, giving Pc ratio ~2.65 =
+    sqrt(7), which is correct physics, not a bug). We therefore scale h
+    homogeneously by doubling t_ply with the layup held fixed."""
     base_layup = [0, 45, -45, 90]
-    lam_thin = _laminate("IM7/8552", base_layup)  # 4 plies
-    lam_thick = _laminate("IM7/8552", base_layup * 2)  # 8 plies
+    lam_thin = _laminate("IM7/8552", base_layup, t_ply=0.152)
+    lam_thick = _laminate("IM7/8552", base_layup, t_ply=0.304)  # exact h -> 2h
     pan, imp = _panel(), _impactor()
     Pc_thin = threshold_load(lam_thin, pan, imp)
     Pc_thick = threshold_load(lam_thick, pan, imp)
-    # h_thick / h_thin = 2 -> Pc_thick / Pc_thin = 2^{3/2} = 2.828...
-    assert Pc_thick / Pc_thin == pytest.approx(2**1.5, rel=1e-2)
+    # h_thick / h_thin = 2 -> Pc_thick / Pc_thin = 2^{3/2} = 2.828... (exact)
+    assert Pc_thick / Pc_thin == pytest.approx(2**1.5, rel=1e-9)

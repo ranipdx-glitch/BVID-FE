@@ -31,8 +31,11 @@ References:
 
 from __future__ import annotations
 
+import functools
 import math
 import warnings
+
+import numpy as np
 
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
@@ -59,6 +62,30 @@ _BOUNDARY_BENDING_FACTOR: dict[str, float] = {
 _CONICAL_HALF_ANGLE_DEG: float = 30.0
 
 
+@functools.lru_cache(maxsize=32)
+def _navier_basis_ssss(
+    Lx_mm: float,
+    Ly_mm: float,
+    x0_mm: float,
+    y0_mm: float,
+    n_modes: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Cached Navier modal basis for a simply-supported plate point load.
+
+    Returns ``(sin2_m, sin2_n, kx, ky)`` where ``sin2_m[i] = sin^2(m*pi*x0/a)``,
+    ``kx[i] = m*pi/a`` (and analogously for ``y``). These depend only on the
+    panel geometry, load location and mode count — not on the laminate — so in
+    geometry-fixed sweeps they are bit-identical across calls and cheap to
+    memoise.
+    """
+    m = np.arange(1, n_modes + 1, dtype=float)
+    kx = m * math.pi / Lx_mm
+    ky = m * math.pi / Ly_mm
+    sin2_m = np.sin(kx * x0_mm) ** 2
+    sin2_n = np.sin(ky * y0_mm) ** 2
+    return sin2_m, sin2_n, kx, ky
+
+
 def _k_bending_ssss(
     lam: Laminate,
     pan: PanelGeometry,
@@ -74,21 +101,27 @@ def _k_bending_ssss(
            + D22 * (n*pi/b)^4
     k_bending = 1 / (w/P)
     """
+    a, b = pan.Lx_mm, pan.Ly_mm
+    if not (0.0 < x0 < a and 0.0 < y0 < b):
+        raise ValueError(
+            f"Point load at ({x0}, {y0}) lies on or outside the simply-supported "
+            f"plate boundary [0, {a}] x [0, {b}]; bending compliance there is "
+            f"infinite (every Navier mode vanishes), so k_bending is undefined. "
+            f"Use an interior point 0 < x0 < {a} and 0 < y0 < {b}."
+        )
     _, _, D = lam.abd_matrices()
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
-    a, b = pan.Lx_mm, pan.Ly_mm
-    w_over_P = 0.0
-    for m in range(1, n_modes + 1):
-        for n in range(1, n_modes + 1):
-            sin_mx = math.sin(m * math.pi * x0 / a)
-            sin_ny = math.sin(n * math.pi * y0 / b)
-            Dmn = (
-                D11 * (m * math.pi / a) ** 4
-                + 2 * (D12 + 2 * D66) * (m * math.pi / a) ** 2 * (n * math.pi / b) ** 2
-                + D22 * (n * math.pi / b) ** 4
-            )
-            w_over_P += (sin_mx * sin_ny) ** 2 / Dmn
-    w_over_P *= 4.0 / (a * b)
+    sin2_m, sin2_n, kx, ky = _navier_basis_ssss(a, b, x0, y0, n_modes)
+    kx2 = kx**2
+    ky2 = ky**2
+    Dmn = (
+        D11 * kx2[:, None] ** 2
+        + 2 * (D12 + 2 * D66) * kx2[:, None] * ky2[None, :]
+        + D22 * ky2[None, :] ** 2
+    )
+    w_over_P = (4.0 / (a * b)) * np.sum(
+        (sin2_m[:, None] * sin2_n[None, :]) / Dmn
+    )
     return 1.0 / w_over_P
 
 
