@@ -14,7 +14,7 @@ class OrthotropicMaterial:
     impact-mapping calibration constants.
 
     Units: moduli and strengths in MPa (N/mm^2), fracture toughness in N/mm,
-    density in t/mm^3 (consistent units for a SI-mm-N-s system).
+    density in kg/mm^3 (e.g. 1.58e-6 for CFRP, matching 1.58 g/cm^3).
 
     Through-thickness strengths (Zt, Zc) and the 1-3 shear strength (S13)
     are optional. For unidirectional CFRP plies under the transverse-isotropy
@@ -84,6 +84,16 @@ class OrthotropicMaterial:
                 raise ValueError(f"{k} must be > 0 if provided (got {v})")
         if not -1.0 < self.nu12 < 0.5:
             raise ValueError(f"nu12 out of physical range (got {self.nu12})")
+        # rho is kg/mm^3; realistic engineering materials span ~[1e-7, 1e-5]
+        # (0.1 .. 10 g/cm^3). A value outside this range almost always means
+        # the user followed the old (wrong) "t/mm^3" docstring and is 1000x
+        # off, which silently corrupts the impact-mapping mass ratio.
+        if not 1e-7 <= self.rho <= 1e-5:
+            raise ValueError(
+                f"rho={self.rho} kg/mm^3 is outside the realistic range "
+                f"[1e-7, 1e-5] (0.1-10 g/cm^3). Note rho is kg/mm^3, "
+                f"e.g. 1.58e-6 for CFRP."
+            )
 
     @property
     def nu21(self) -> float:
