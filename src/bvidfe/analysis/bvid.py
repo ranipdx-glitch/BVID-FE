@@ -75,6 +75,7 @@ class BvidAnalysis:
         damage = self._resolve_damage(lam)
         sigma_0 = _pristine_strength(lam, self.config.loading)
         notes: list[str] = []
+        warnings_tags: list[str] = []
 
         if self.config.tier == "empirical":
             sigma = self._empirical(lam, damage, sigma_0)
@@ -99,6 +100,8 @@ class BvidAnalysis:
                     self.config, damage, lam, sigma_0
                 )
                 notes.extend(buckling_notes)
+                if buckling_notes:
+                    warnings_tags.append("fe3d_buckling_unconverged")
                 sigma_fpf = _fe3d_cai_first_ply_failure(self.config, damage, lam, sigma_0)
                 buckling_plausible = sigma_buckling >= 0.05 * sigma_0
                 if not buckling_plausible and not buckling_notes:
@@ -112,11 +115,26 @@ class BvidAnalysis:
                         f"5% of pristine ({sigma_0:.1f} MPa); discarded as a "
                         "numerical artefact and used first-ply-failure instead."
                     )
+                    warnings_tags.append("fe3d_buckling_artefact_dropped")
                 sigma = min(sigma_buckling, sigma_fpf) if buckling_plausible else sigma_fpf
                 buckling_eigs = [lambda_crit] if lambda_crit > 0 else None
+                fpf_governs = not buckling_plausible
             else:
                 sigma = fe3d_tai(self.config, damage, lam, sigma_0)
                 buckling_eigs = None
+                fpf_governs = True
+            # The FPF / TAI BC builders (compression_bcs / tension_bcs) do
+            # not yet honour cfg.panel.boundary — only the buckling path
+            # does. When the reported residual comes from FPF/TAI and a
+            # non-default boundary was requested, surface that it had no
+            # effect rather than letting it look silently applied (#32).
+            if fpf_governs and self.config.panel.boundary != "simply_supported":
+                notes.append(
+                    f"fe3d FPF/TAI: panel.boundary="
+                    f"{self.config.panel.boundary!r} is not yet applied to "
+                    f"the FPF/TAI BC set; the residual is unaffected by it."
+                )
+                warnings_tags.append("fe3d_boundary_not_applied_to_fpf_tai")
             critical_interface = None
             field_results = None
         else:
@@ -134,6 +152,7 @@ class BvidAnalysis:
             critical_sublaminate=critical_interface,
             field_results=field_results,
             notes=notes,
+            warnings=warnings_tags,
         )
 
     def _resolve_damage(self, lam: Laminate) -> DamageState:

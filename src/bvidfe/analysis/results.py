@@ -12,7 +12,46 @@ from bvidfe.damage.state import DamageState
 
 @dataclass
 class FieldResults:
-    """3D FE tier field outputs. Populated only when tier='fe3d'."""
+    """Per-mesh field outputs reserved for the 3D FE tier.
+
+    .. note::
+       **Currently always ``None``.** ``BvidAnalysis.run()`` does not yet
+       populate ``AnalysisResults.field_results`` for any tier (the fe3d
+       tier returns scalar residual strength + buckling eigenvalues only).
+       This dataclass documents the *intended* contract for a future
+       field-output release; downstream code should treat
+       ``result.field_results`` as optional and handle ``None``.
+
+    Attributes
+    ----------
+    displacement : np.ndarray
+        Nodal displacement, shape ``(n_nodes, 3)``, float64, units mm,
+        in the global (x, y, z) coordinate system, original (undeformed)
+        node ordering.
+    stress_global : np.ndarray
+        Per-element stress in the global frame, shape
+        ``(n_elements, 6)``, units MPa, Voigt order
+        ``[σxx, σyy, σzz, σyz, σxz, σxy]``.
+    strain_global : np.ndarray
+        Per-element strain in the global frame, shape
+        ``(n_elements, 6)``, dimensionless, same Voigt order as
+        ``stress_global``.
+    stress_local : np.ndarray
+        Per-element stress rotated into each ply's material (fibre) axes,
+        shape ``(n_elements, 6)``, units MPa, Voigt order
+        ``[σ11, σ22, σ33, σ23, σ13, σ12]``.
+    failure_index : np.ndarray
+        Per-element maximum failure index, shape ``(n_elements,)``,
+        dimensionless (≥ 1.0 indicates predicted first-ply failure).
+    buckling_mode_shape : np.ndarray, optional
+        First buckling eigenvector as nodal displacement, shape
+        ``(n_nodes, 3)``, normalised (dimensionless). ``None`` when no
+        buckling solve ran or it did not converge.
+    cohesive_damage : np.ndarray, optional
+        Per-interface-element scalar cohesive damage variable in
+        ``[0, 1]`` (0 = intact, 1 = fully separated). ``None`` until
+        true cohesive surfaces land (see README "Limitations").
+    """
 
     displacement: np.ndarray
     stress_global: np.ndarray
@@ -61,6 +100,25 @@ class AnalysisResults:
     critical_sublaminate: Optional[int] = None
     field_results: Optional[FieldResults] = None
     notes: List[str] = field(default_factory=list)
+    #: Machine-readable diagnostic tags, distinct from the human-readable
+    #: ``notes``. Lets a script disambiguate an overloaded ``knockdown``
+    #: (e.g. ``knockdown == 1.0`` from "pristine-equivalent" vs "fe3d
+    #: buckling eigensolve failed") without string-scraping ``notes``.
+    #: Populated tags (default ``[]``):
+    #:
+    #: - ``"fe3d_buckling_unconverged"`` — the fe3d buckling eigensolve
+    #:   reported its own failure; residual is from first-ply failure.
+    #: - ``"fe3d_buckling_artefact_dropped"`` — buckling solved but the
+    #:   result was below 5% of pristine and was discarded as a numerical
+    #:   artefact; residual is from first-ply failure.
+    #: - ``"fe3d_boundary_not_applied_to_fpf_tai"`` — a non-default
+    #:   ``panel.boundary`` was requested but the FPF/TAI BC set does not
+    #:   yet honour it (only the buckling path does).
+    #:
+    #: The ``impactor_mass_ratio_below_unity`` / ``dpa_panel_area_cap_clipped``
+    #: regimes currently surface only via Python ``UserWarning`` + ``notes``;
+    #: structured tags for them are future work.
+    warnings: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [
@@ -77,6 +135,10 @@ class AnalysisResults:
             lines.append("  notes:")
             for note in self.notes:
                 lines.append(f"    - {note}")
+        if self.warnings:
+            lines.append("  warnings:")
+            for w in self.warnings:
+                lines.append(f"    - {w}")
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -104,5 +166,6 @@ class AnalysisResults:
             "critical_sublaminate": self.critical_sublaminate,
             "config_snapshot": self.config_snapshot,
             "notes": list(self.notes),
+            "warnings": list(self.warnings),
         }
         return out

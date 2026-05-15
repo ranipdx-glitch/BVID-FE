@@ -13,7 +13,32 @@ from bvidfe.impact.mapping import ImpactEvent
 
 @dataclass
 class MeshParams:
-    """Mesh resolution parameters for the 3D FE tier."""
+    """Mesh resolution parameters for the ``tier="fe3d"`` solve.
+
+    Parameters
+    ----------
+    elements_per_ply : int
+        Number of hex elements stacked through the thickness of each ply
+        (dimensionless count, ``>= 1``). Total through-thickness elements
+        ``nz = n_plies * elements_per_ply``. Default ``1`` (one element
+        per ply) is adequate for first-ply-failure screening; increase
+        for smoother through-thickness stress gradients at higher cost.
+    in_plane_size_mm : float
+        Target in-plane element edge length in millimetres (``> 0``). The
+        mesh uses ``nx = ceil(Lx_mm / in_plane_size_mm)`` and
+        ``ny = ceil(Ly_mm / in_plane_size_mm)`` elements in x and y, so
+        smaller values resolve the stress concentration around the damage
+        footprint more finely at quadratically higher element count and
+        memory. Default ``5.0`` mm. On Streamlit Cloud (1 GB RAM) keep
+        this ``>= 5`` mm.
+    cohesive_zone_factor : float
+        Reserved (``> 0``, default ``1.0``). Intended as a multiplier on
+        the cohesive-zone characteristic length once true cohesive
+        surfaces land (see README "Limitations"); **currently validated
+        but not consumed** by ``build_fe_mesh`` — the present fe3d tier
+        uses a component-wise stiffness-reduction model, not cohesive
+        elements. Leave at the default.
+    """
 
     elements_per_ply: int = 1
     in_plane_size_mm: float = 5.0

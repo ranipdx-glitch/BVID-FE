@@ -60,6 +60,12 @@ bvidfe --material IM7/8552 \
        --energy 30
 ```
 
+All lengths are in **millimetres**. `--panel` is `<Lx>x<Ly>` (in-plane
+dimensions, x then y, literal `x` separator, no spaces — e.g. `150x100`
+is Lx = 150 mm, Ly = 100 mm). `--thickness` is the per-ply thickness in
+mm, `--layup` is a comma-separated list of ply angles in degrees, and
+`--energy` is the impact energy in joules.
+
 ### Python API — impact-driven path
 
 ```python

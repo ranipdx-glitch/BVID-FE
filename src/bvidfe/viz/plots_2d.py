@@ -151,7 +151,7 @@ def plot_knockdown_curve(
     color = COLORS.get(tier_label, COLORS["knockdown"])
     ax.plot(energies_J, knockdowns, "-o", color=color, label=tier_label or "knockdown")
     ax.set_xlabel("Impact energy [J]")
-    ax.set_ylabel("Strength retention (knockdown)")
+    ax.set_ylabel("Strength retention (knockdown) [-]")
     ax.set_ylim(0, 1.05)
     ax.grid(True, linestyle="--", alpha=0.3)
     if tier_label:
@@ -177,7 +177,7 @@ def plot_tier_comparison(
         color = COLORS.get(tier, None)
         ax.plot(energies_J, kd, "-o", color=color, label=tier)
     ax.set_xlabel("Impact energy [J]")
-    ax.set_ylabel("Strength retention (knockdown)")
+    ax.set_ylabel("Strength retention (knockdown) [-]")
     ax.set_ylim(0, 1.05)
     ax.grid(True, linestyle="--", alpha=0.3)
     ax.legend()

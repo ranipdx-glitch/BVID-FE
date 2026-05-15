@@ -87,6 +87,28 @@ def _try_run_one(cfg: AnalysisConfig, on_error: str, label: str) -> dict:
         return row
 
 
+# Fixed result schema. The swept independent variable goes first; `error`
+# is always present (NaN/empty on success) so downstream `df["error"]`
+# never KeyErrors and column order is identical across runs (#38).
+_RESULT_COLS = (
+    "knockdown",
+    "residual_MPa",
+    "pristine_MPa",
+    "dpa_mm2",
+    "dent_mm",
+    "n_delaminations",
+    "tier_used",
+    "error",
+)
+
+
+def _finalize(rows: List[dict], swept_col: str) -> pd.DataFrame:
+    """Build the DataFrame with a deterministic column order regardless of
+    how many iterations failed: ``[swept_col, *_RESULT_COLS]`` with
+    ``error`` always present (#38)."""
+    return pd.DataFrame(rows).reindex(columns=[swept_col, *_RESULT_COLS])
+
+
 def _write_csv(df: pd.DataFrame, csv_path: Optional[Path]) -> None:
     if csv_path is not None:
         df.to_csv(Path(csv_path), index=False)
@@ -120,7 +142,7 @@ def sweep_energies(
         row["energy_J"] = float(E)
         rows.append(row)
         _emit_progress(progress_callback, i + 1, n)
-    df = pd.DataFrame(rows)
+    df = _finalize(rows, "energy_J")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
 
@@ -143,7 +165,7 @@ def sweep_layups(
         row["layup"] = layup_str
         rows.append(row)
         _emit_progress(progress_callback, i + 1, n)
-    df = pd.DataFrame(rows)
+    df = _finalize(rows, "layup")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
 
@@ -165,6 +187,6 @@ def sweep_thicknesses(
         row["ply_thickness_mm"] = float(t)
         rows.append(row)
         _emit_progress(progress_callback, i + 1, n)
-    df = pd.DataFrame(rows)
+    df = _finalize(rows, "ply_thickness_mm")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df

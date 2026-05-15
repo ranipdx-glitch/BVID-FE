@@ -160,3 +160,30 @@ def test_sweep_energies_rejects_unknown_on_error():
 
     with pytest.raises(ValueError, match="on_error must be one of"):
         sweep_energies(cfg, energies_J=[5], on_error="bogus")
+
+
+def test_sweep_column_schema_is_deterministic():
+    """Issue #38: column order is fixed (swept var first, `error` always
+    present) regardless of whether any iteration failed."""
+    expected_results = [
+        "knockdown",
+        "residual_MPa",
+        "pristine_MPa",
+        "dpa_mm2",
+        "dent_mm",
+        "n_delaminations",
+        "tier_used",
+        "error",
+    ]
+    cfg = _base_impact_cfg()
+
+    # All-success run with on_error='raise': `error` column still present.
+    df_e = sweep_energies(cfg, energies_J=[5, 10, 20])
+    assert list(df_e.columns) == ["energy_J", *expected_results]
+    assert df_e["error"].isna().all()
+
+    df_l = sweep_layups(cfg, layups=[[0, 90] * 8, [0, 45, -45, 90] * 4])
+    assert list(df_l.columns) == ["layup", *expected_results]
+
+    df_t = sweep_thicknesses(cfg, ply_thicknesses_mm=[0.125, 0.152])
+    assert list(df_t.columns) == ["ply_thickness_mm", *expected_results]
