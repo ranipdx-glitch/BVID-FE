@@ -120,8 +120,53 @@ def _point_in_ellipse(x: float, y: float, ellipse: DelaminationEllipse) -> bool:
     return (xr / ellipse.major_mm) ** 2 + (yr / ellipse.minor_mm) ** 2 <= 1.0
 
 
-def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
-    """Build a structured brick mesh for the panel with per-element metadata."""
+def _points_in_ellipse(x: np.ndarray, y: np.ndarray, ellipse: DelaminationEllipse) -> np.ndarray:
+    """Vectorised ``_point_in_ellipse`` over coordinate arrays.
+
+    cos/sin of the orientation are evaluated once (not once per element).
+    The per-point arithmetic is the exact same sequence of scalar
+    operations as ``_point_in_ellipse``, applied elementwise by numpy, so
+    the boolean result is identical element by element.
+    """
+    c = math.cos(math.radians(-ellipse.orientation_deg))
+    s = math.sin(math.radians(-ellipse.orientation_deg))
+    dx = x - ellipse.centroid_mm[0]
+    dy = y - ellipse.centroid_mm[1]
+    xr = c * dx - s * dy
+    yr = s * dx + c * dy
+    return (xr / ellipse.major_mm) ** 2 + (yr / ellipse.minor_mm) ** 2 <= 1.0
+
+
+@dataclass
+class FeMeshSkeleton:
+    """Damage-independent part of a structured FE mesh.
+
+    Built once per configuration by ``build_fe_mesh_skeleton`` and reused
+    across every iteration of a parametric sweep, where only the damage
+    state changes. ``apply_damage`` fills in the per-element damage factors
+    cheaply and returns a full :class:`FeMesh`.
+    """
+
+    node_coords: np.ndarray
+    element_connectivity: np.ndarray
+    element_dof_maps: List[np.ndarray]
+    ply_indices: np.ndarray
+    ply_angles_deg: np.ndarray
+    centroid_x: np.ndarray  # (n_elements,) element centroid x
+    centroid_y: np.ndarray  # (n_elements,) element centroid y
+    cz_bot: np.ndarray  # (n_elements,) element bottom z
+    cz_top: np.ndarray  # (n_elements,) element top z
+    ply_thickness_mm: float
+
+
+def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
+    """Build the damage-independent skeleton of the structured brick mesh.
+
+    Connectivity and DOF maps are produced with pure numpy index arithmetic
+    (no per-element Python loop), matching the element ordering
+    ``elem = k*(ny*nx) + j*nx + i`` and the Abaqus hex node convention used
+    by the original triple-loop builder exactly.
+    """
     panel = config.panel
     layup = config.layup_deg
     h = config.ply_thickness_mm
@@ -133,7 +178,7 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
     ny = max(1, math.ceil(Ly / mesh.in_plane_size_mm))
     nz = n_plies * mesh.elements_per_ply
 
-    # Nodes on a regular grid
+    # Nodes on a regular grid (k outer, j, i inner — matches _node_id)
     x_nodes = np.linspace(0.0, Lx, nx + 1)
     y_nodes = np.linspace(0.0, Ly, ny + 1)
     z_nodes = np.linspace(0.0, Lz, nz + 1)
@@ -142,79 +187,154 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
         dtype=float,
     )
 
-    def _node_id(i: int, j: int, k: int) -> int:
-        """Flat index into node_coords. i along x, j along y, k along z."""
-        return k * (nx + 1) * (ny + 1) + j * (nx + 1) + i
+    nxp1 = nx + 1
+    nyp1 = ny + 1
+    layer = nxp1 * nyp1  # nodes per k-layer
 
-    # Build element connectivity (Abaqus hex convention)
-    connectivity = np.zeros((nx * ny * nz, 8), dtype=int)
-    ply_indices = np.zeros(nx * ny * nz, dtype=int)
-    ply_angles = np.zeros(nx * ny * nz, dtype=float)
-    damage_factors = np.ones(nx * ny * nz, dtype=float)
-    in_plane_damage_factors = np.ones(nx * ny * nz, dtype=float)
-    element_dof_maps: List[np.ndarray] = []
+    # Element (i, j, k) grid in the original loop order: k outer, j, i inner.
+    kk, jj, ii = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing="ij")
+    ii = ii.ravel()
+    jj = jj.ravel()
+    kk = kk.ravel()  # length n_elements, ordered elem = k*(ny*nx) + j*nx + i
 
-    elem_idx = 0
-    for k in range(nz):
-        ply_i = k // mesh.elements_per_ply
-        for j in range(ny):
-            for i in range(nx):
-                nodes_this_element = [
-                    _node_id(i, j, k),
-                    _node_id(i + 1, j, k),
-                    _node_id(i + 1, j + 1, k),
-                    _node_id(i, j + 1, k),
-                    _node_id(i, j, k + 1),
-                    _node_id(i + 1, j, k + 1),
-                    _node_id(i + 1, j + 1, k + 1),
-                    _node_id(i, j + 1, k + 1),
-                ]
-                connectivity[elem_idx] = nodes_this_element
-                ply_indices[elem_idx] = ply_i
-                ply_angles[elem_idx] = layup[ply_i]
-                dof_map = np.array(
-                    [3 * n + d for n in nodes_this_element for d in range(3)],
-                    dtype=int,
-                )
-                element_dof_maps.append(dof_map)
+    def _nid(i: np.ndarray, j: np.ndarray, k: np.ndarray) -> np.ndarray:
+        return k * layer + j * nxp1 + i
 
-                # Compute element centroid for damage check
-                cx = 0.5 * (x_nodes[i] + x_nodes[i + 1])
-                cy = 0.5 * (y_nodes[j] + y_nodes[j + 1])
-                cz_top = z_nodes[k + 1]
-                cz_bot = z_nodes[k]
+    # Connectivity (Abaqus hex convention), same 8-node ordering as before.
+    connectivity = np.empty((ii.shape[0], 8), dtype=int)
+    connectivity[:, 0] = _nid(ii, jj, kk)
+    connectivity[:, 1] = _nid(ii + 1, jj, kk)
+    connectivity[:, 2] = _nid(ii + 1, jj + 1, kk)
+    connectivity[:, 3] = _nid(ii, jj + 1, kk)
+    connectivity[:, 4] = _nid(ii, jj, kk + 1)
+    connectivity[:, 5] = _nid(ii + 1, jj, kk + 1)
+    connectivity[:, 6] = _nid(ii + 1, jj + 1, kk + 1)
+    connectivity[:, 7] = _nid(ii, jj + 1, kk + 1)
 
-                # Check delamination overlap: element straddles an interface at
-                # z = (iface + 1) * h if cz_bot < z_iface < cz_top AND
-                # (cx, cy) is inside the ellipse. Reduces only the OOP factor;
-                # in-plane stiffness is preserved (plies still intact).
-                for ell in damage.delaminations:
-                    z_iface = (ell.interface_index + 1) * h
-                    if cz_bot <= z_iface <= cz_top:
-                        if _point_in_ellipse(cx, cy, ell):
-                            damage_factors[elem_idx] = DAMAGE_OOP_FACTOR
-                            break
+    ply_idx_all = kk // mesh.elements_per_ply
+    ply_indices = ply_idx_all.astype(int)
+    layup_arr = np.asarray(layup, dtype=float)
+    ply_angles = layup_arr[ply_idx_all]
 
-                # Fiber-break core: any element within fiber_break_radius of
-                # any delamination centroid (all through-thickness layers).
-                # Reduces both factors — fibers broken means in-plane loss too.
-                if damage.fiber_break_radius_mm > 0:
-                    for ell in damage.delaminations:
-                        dx = cx - ell.centroid_mm[0]
-                        dy = cy - ell.centroid_mm[1]
-                        if math.sqrt(dx * dx + dy * dy) <= damage.fiber_break_radius_mm:
-                            damage_factors[elem_idx] = DAMAGE_OOP_FACTOR
-                            in_plane_damage_factors[elem_idx] = DAMAGE_FIBER_BREAK_INPLANE_FACTOR
-                            break
+    # dof_map[e] = [3*n + d for n in connectivity[e] for d in (0,1,2)]
+    dof_maps_arr = (3 * connectivity[:, :, None] + np.arange(3)[None, None, :]).reshape(
+        connectivity.shape[0], 24
+    )
+    element_dof_maps: List[np.ndarray] = [np.array(row, dtype=int) for row in dof_maps_arr]
 
-                elem_idx += 1
+    # Element centroids / through-thickness extents (identical floats to
+    # the original 0.5*(x_nodes[i]+x_nodes[i+1]) etc.).
+    cx_grid = 0.5 * (x_nodes[:-1] + x_nodes[1:])  # (nx,)
+    cy_grid = 0.5 * (y_nodes[:-1] + y_nodes[1:])  # (ny,)
+    centroid_x = cx_grid[ii]
+    centroid_y = cy_grid[jj]
+    cz_bot = z_nodes[kk]
+    cz_top = z_nodes[kk + 1]
 
-    return FeMesh(
+    return FeMeshSkeleton(
         node_coords=node_coords,
         element_connectivity=connectivity,
         element_dof_maps=element_dof_maps,
         ply_indices=ply_indices,
         ply_angles_deg=ply_angles,
+        centroid_x=centroid_x,
+        centroid_y=centroid_y,
+        cz_bot=cz_bot,
+        cz_top=cz_top,
+        ply_thickness_mm=h,
+    )
+
+
+def apply_damage(skeleton: FeMeshSkeleton, damage: DamageState) -> FeMesh:
+    """Fill per-element damage factors onto a skeleton, returning a FeMesh.
+
+    Vectorised equivalent of the original per-element damage logic:
+    out-of-plane reduction where an element straddles a delaminated
+    interface and its centroid lies in the ellipse, then fiber-break-core
+    reduction (both factors) within ``fiber_break_radius_mm`` of any
+    delamination centroid. Element-by-element results are identical to the
+    scalar form (same comparisons, same constants).
+    """
+    n_elem = skeleton.element_connectivity.shape[0]
+    cx = skeleton.centroid_x
+    cy = skeleton.centroid_y
+    cz_bot = skeleton.cz_bot
+    cz_top = skeleton.cz_top
+    h = skeleton.ply_thickness_mm
+
+    damage_factors = np.ones(n_elem, dtype=float)
+    in_plane_damage_factors = np.ones(n_elem, dtype=float)
+
+    # OOP: first ellipse (in order) whose interface the element straddles
+    # and whose footprint contains the centroid sets the OOP factor. The
+    # scalar code breaks on the first match; assigning a constant makes the
+    # vectorised "any match" result identical.
+    oop_hit = np.zeros(n_elem, dtype=bool)
+    for ell in damage.delaminations:
+        z_iface = (ell.interface_index + 1) * h
+        straddles = (cz_bot <= z_iface) & (z_iface <= cz_top)
+        if not straddles.any():
+            continue
+        inside = _points_in_ellipse(cx, cy, ell)
+        oop_hit |= straddles & inside
+    damage_factors[oop_hit] = DAMAGE_OOP_FACTOR
+
+    # Fiber-break core: within fiber_break_radius of any delamination
+    # centroid → both factors reduced (OOP also forced to DAMAGE_OOP_FACTOR).
+    if damage.fiber_break_radius_mm > 0:
+        fb_hit = np.zeros(n_elem, dtype=bool)
+        r = damage.fiber_break_radius_mm
+        for ell in damage.delaminations:
+            dx = cx - ell.centroid_mm[0]
+            dy = cy - ell.centroid_mm[1]
+            fb_hit |= np.sqrt(dx * dx + dy * dy) <= r
+        damage_factors[fb_hit] = DAMAGE_OOP_FACTOR
+        in_plane_damage_factors[fb_hit] = DAMAGE_FIBER_BREAK_INPLANE_FACTOR
+
+    return FeMesh(
+        node_coords=skeleton.node_coords,
+        element_connectivity=skeleton.element_connectivity,
+        element_dof_maps=skeleton.element_dof_maps,
+        ply_indices=skeleton.ply_indices,
+        ply_angles_deg=skeleton.ply_angles_deg,
         damage_factors=damage_factors,
         in_plane_damage_factors=in_plane_damage_factors,
     )
+
+
+def _skeleton_signature(config: AnalysisConfig) -> tuple:
+    """Hashable signature of the mesh-defining (damage-independent) inputs.
+
+    Two configs with equal signatures produce an identical skeleton, so the
+    skeleton can be reused (e.g. across a ``sweep_energies`` run where only
+    the damage state changes between iterations).
+    """
+    mesh = config.mesh if config.mesh is not None else MeshParams()
+    return (
+        float(config.panel.Lx_mm),
+        float(config.panel.Ly_mm),
+        tuple(float(a) for a in config.layup_deg),
+        float(config.ply_thickness_mm),
+        int(mesh.elements_per_ply),
+        float(mesh.in_plane_size_mm),
+    )
+
+
+# Single-entry skeleton cache. A parametric sweep that varies only the
+# damage state (sweep_energies) calls build_fe_mesh repeatedly with an
+# identical mesh signature; caching the last skeleton makes those calls
+# rebuild only the cheap per-element damage factors via apply_damage.
+_SKELETON_CACHE: dict = {}
+
+
+def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
+    """Build a structured brick mesh for the panel with per-element metadata."""
+    sig = _skeleton_signature(config)
+    skeleton = _SKELETON_CACHE.get(sig)
+    if skeleton is None:
+        skeleton = build_fe_mesh_skeleton(config)
+        # Keep only the most recent skeleton (sweeps fix the mesh signature
+        # for the whole run; this bounds memory to one mesh).
+        _SKELETON_CACHE.clear()
+        _SKELETON_CACHE[sig] = skeleton
+    return apply_damage(skeleton, damage)

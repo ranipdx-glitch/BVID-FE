@@ -19,7 +19,7 @@ from bvidfe.analysis.config import AnalysisConfig
 from bvidfe.analysis.fe_mesh import FeMesh, build_fe_mesh, estimate_fe_mesh_size
 from bvidfe.core.laminate import Laminate
 from bvidfe.damage.state import DamageState
-from bvidfe.elements.hex8 import Hex8Element
+from bvidfe.elements.hex8 import Hex8Element, build_geometry_table
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 from bvidfe.solver.assembler import assemble_global_stiffness
@@ -136,12 +136,30 @@ def _build_elements(mesh: FeMesh, lam: Laminate) -> List[Hex8Element]:
       - `mesh.in_plane_damage_factors[e]` scales the in-plane sub-block
     """
     elements: List[Hex8Element] = []
+    # On the regular cuboid grid produced by build_fe_mesh, every element of a
+    # given ply is a pure translate of every other, so its 2x2x2 Gauss-point
+    # (B, detJ, gradN) table is identical. Compute it once per ply (keyed by
+    # ply index AND element geometry — the latter keeps mixed-thickness plies,
+    # issue #5/PR#13, correct) and share it across that ply's elements.
+    geom_cache: dict[tuple, object] = {}
     for eidx in range(mesh.n_elements):
         node_ids = mesh.element_connectivity[eidx]
         node_coords = mesh.node_coords[node_ids]
         mat = lam.material
         ply_angle = float(mesh.ply_angles_deg[eidx])
-        elem = Hex8Element(node_coords, mat, ply_angle_deg=ply_angle)
+        ply_i = int(mesh.ply_indices[eidx])
+        dims = node_coords.max(axis=0) - node_coords.min(axis=0)
+        cache_key = (
+            ply_i,
+            round(float(dims[0]), 9),
+            round(float(dims[1]), 9),
+            round(float(dims[2]), 9),
+        )
+        b_table = geom_cache.get(cache_key)
+        if b_table is None:
+            b_table = build_geometry_table(node_coords)
+            geom_cache[cache_key] = b_table
+        elem = Hex8Element(node_coords, mat, ply_angle_deg=ply_angle, b_table=b_table)
         f_oop = float(mesh.damage_factors[eidx])
         f_ip = float(mesh.in_plane_damage_factors[eidx])
         # Build a 6x6 element-wise scaling mask: start from f_oop everywhere

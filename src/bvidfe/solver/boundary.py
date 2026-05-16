@@ -32,14 +32,26 @@ def apply_dirichlet_penalty(
     """Apply Dirichlet BCs to (K, F) via the penalty method.
 
     Returns a new (K_mod, F_mod) without mutating the inputs.
+
+    The diagonal is updated value-only: every DOF is self-coupled in an
+    assembled FE stiffness matrix, so ``K[d, d]`` already exists and adding
+    ``penalty`` via ``K + sp.diags(p)`` introduces no new sparsity (avoids
+    the SparseEfficiencyWarning storm of scalar ``K_csr[d, d] = ...``
+    assignment). Numerically identical to the previous per-DOF loop.
     """
-    K_csr = K.tocsr(copy=True)
+    n_dof = K.shape[0]
     F_out = F.copy()
-    for bc in bcs:
-        d = bc.dof
-        K_csr[d, d] = K_csr[d, d] + penalty
-        F_out[d] = F_out[d] + penalty * bc.value
-    return K_csr.tocsc(), F_out
+    bc_dofs = np.fromiter((bc.dof for bc in bcs), dtype=int, count=len(bcs))
+    bc_values = np.fromiter((bc.value for bc in bcs), dtype=float, count=len(bcs))
+
+    p = np.zeros(n_dof)
+    # np.add.at accumulates duplicates, matching the loop's repeated
+    # K_csr[d, d] += penalty / F_out[d] += penalty * value for repeated DOFs.
+    np.add.at(p, bc_dofs, penalty)
+    np.add.at(F_out, bc_dofs, penalty * bc_values)
+
+    K_mod = (K + sp.diags(p, format="csc")).tocsc()
+    return K_mod, F_out
 
 
 def _nodes_on_plane(

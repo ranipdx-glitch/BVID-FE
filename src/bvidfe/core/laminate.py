@@ -272,7 +272,16 @@ class Laminate:
             Effective Poisson's ratio nu_xy (dimensionless).
         """
         h = self.thickness_mm
-        a = np.linalg.inv(self._A)  # 3x3 compliance (mm/N)
+        # Guard against a numerically singular A: np.linalg.inv returns
+        # NaN/Inf (no exception) when det(A) ~ 0, which then propagates
+        # silently into stress recovery as garbage. Fail loudly instead.
+        cond = float(np.linalg.cond(self._A))
+        if not np.isfinite(cond) or cond > 1e10:
+            raise ValueError(
+                f"Laminate A matrix is ill-conditioned (cond={cond:.2e}); "
+                f"check layup / ply_thickness_mm consistency."
+            )
+        a = np.linalg.solve(self._A, np.eye(3))  # 3x3 compliance (mm/N)
         # Normalise by thickness to get extensional compliance per unit modulus
         a_star = a / h  # 1/MPa
 
@@ -280,6 +289,15 @@ class Laminate:
         Ey = 1.0 / a_star[1, 1]
         Gxy = 1.0 / a_star[2, 2]
         nuxy = -a_star[0, 1] / a_star[0, 0]
+
+        for name, val in (("Ex", Ex), ("Ey", Ey), ("Gxy", Gxy)):
+            if not np.isfinite(val) or val <= 0.0:
+                raise ValueError(
+                    f"effective {name}={val} from an ill-conditioned laminate "
+                    f"A matrix; check layup / ply_thickness_mm consistency."
+                )
+        if not np.isfinite(nuxy):
+            raise ValueError(f"effective nuxy={nuxy} from an ill-conditioned laminate A matrix.")
 
         return Ex, Ey, Gxy, nuxy
 
