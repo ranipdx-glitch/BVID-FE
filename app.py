@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import sys
 import warnings
 from dataclasses import replace
@@ -24,7 +25,8 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless backend; required on Streamlit Cloud
 
-import numpy as np  # noqa: E402  (matplotlib.use must run first)
+import matplotlib.pyplot as plt  # noqa: E402  (matplotlib.use must run first)
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
@@ -40,7 +42,7 @@ from bvidfe.analysis.fe_mesh import build_fe_mesh, estimate_fe_mesh_size  # noqa
 from bvidfe.analysis.fe_tier import FE3D_MAX_DOF  # noqa: E402
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry  # noqa: E402
 from bvidfe.core.material import MATERIAL_LIBRARY  # noqa: E402
-from bvidfe.damage.io import CScanSchemaError, load_cscan_json  # noqa: E402
+from bvidfe.damage.io import CScanSchemaError, damage_state_from_dict  # noqa: E402
 from bvidfe.damage.state import DamageState, DelaminationEllipse  # noqa: E402
 from bvidfe.impact.mapping import ImpactEvent, impact_to_damage  # noqa: E402
 from bvidfe.impact.olsson import onset_energy  # noqa: E402
@@ -78,29 +80,109 @@ BOUNDARIES: list[str] = ["simply_supported", "clamped", "free"]
 IMPACTOR_SHAPES: list[str] = ["hemispherical", "flat", "conical"]
 
 
+MAX_PLIES = 400
+
+
 def _parse_layup(text: str) -> list[float]:
-    """Parse a comma- or whitespace-separated layup string into floats."""
+    """Parse a comma- or whitespace-separated layup string into floats.
+
+    Rejects non-finite values (nan/inf), out-of-range angles, and absurdly
+    long stacks so a malformed paste can't produce NaN ABD matrices or
+    exhaust memory.
+    """
     cleaned = text.replace(";", ",").replace("\n", ",")
-    return [float(x.strip()) for x in cleaned.split(",") if x.strip()]
+    tokens = [x.strip() for x in cleaned.split(",") if x.strip()]
+    if len(tokens) > MAX_PLIES:
+        raise ValueError(f"layup has {len(tokens)} plies; the cap is {MAX_PLIES}")
+    angles = [float(t) for t in tokens]
+    for a in angles:
+        if not math.isfinite(a):
+            raise ValueError("ply angles must be finite numbers")
+        if not -90.0 <= a <= 90.0:
+            raise ValueError("ply angles must be within [-90, 90] degrees")
+    return angles
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=8)
 def _run_analysis_cached(config_dict: dict) -> dict:
     """Run BvidAnalysis from a JSON-safe config dict and return a dict.
 
     Caching key is the config dict itself, so wiggling unrelated UI
-    widgets won't re-trigger a 30-second fe3d solve.
+    widgets won't re-trigger a 30-second fe3d solve. ``st.cache_data``
+    returns a fresh copy on each access, so the contained objects are
+    safe for the result tabs to consume. ``max_entries`` bounds memory
+    on the 1 GB Streamlit Cloud tier. The display mesh is built here
+    (once per unique config) instead of on every rerun in two tabs.
     """
     cfg = _config_from_dict(config_dict)
     result = BvidAnalysis(cfg).run()
+    cfg_mesh = cfg if cfg.mesh is not None else replace(cfg, mesh=MeshParams())
+    try:
+        mesh = build_fe_mesh(cfg_mesh, result.damage)
+    except Exception:
+        # A display-mesh failure must not sink the numeric result; the
+        # 3D/Severity tabs surface the absence with a friendly message.
+        mesh = None
     return {
         "result_dict": result.to_dict(),
         "damage": result.damage,
         "config": cfg,
+        "config_dict": config_dict,
+        "mesh_config": cfg_mesh,
+        "mesh": mesh,
         "buckling_eigenvalues": result.buckling_eigenvalues,
         "notes": list(result.notes),
         "summary_text": result.summary(),
     }
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _knockdown_sweep_cached(config_dict: dict, energies: tuple[float, ...]) -> pd.DataFrame:
+    """Empirical knockdown sweep, cached so it doesn't rerun every script pass."""
+    cfg = replace(_config_from_dict(config_dict), tier="empirical")
+    return sweep_energies(cfg, list(energies), progress_callback=None)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _onset_preview_cached(
+    material: str,
+    layup: tuple[float, ...],
+    ply_thickness_mm: float,
+    Lx_mm: float,
+    Ly_mm: float,
+    boundary: str,
+    energy_J: float,
+    diameter_mm: float,
+    shape: str,
+    mass_kg: float,
+    loc_xy: tuple[float, float],
+) -> str | None:
+    """Cached Olsson onset/DPA preview so it isn't recomputed every keystroke."""
+    try:
+        mat = MATERIAL_LIBRARY[material]
+        lam = Laminate(mat, list(layup), ply_thickness_mm)
+        pan = PanelGeometry(Lx_mm=Lx_mm, Ly_mm=Ly_mm, boundary=boundary)
+        impactor = ImpactorGeometry(diameter_mm=diameter_mm, shape=shape)
+        ev = ImpactEvent(
+            energy_J=energy_J,
+            impactor=impactor,
+            mass_kg=mass_kg,
+            location_xy_mm=loc_xy,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            E_onset = onset_energy(lam, pan, impactor)
+            dmg = impact_to_damage(ev, lam, pan)
+        A_panel = Lx_mm * Ly_mm
+        pct = 100.0 * dmg.projected_damage_area_mm2 / A_panel if A_panel else 0.0
+        flag = " ⚠ SATURATED" if pct >= 79.0 else ""
+        return (
+            f"E_onset ≈ **{E_onset:.2f} J** · "
+            f"predicted DPA ≈ **{dmg.projected_damage_area_mm2:.0f} mm²** "
+            f"({pct:.1f}% of panel){flag}"
+        )
+    except Exception:
+        return None
 
 
 def _config_from_dict(d: dict) -> AnalysisConfig:
@@ -206,9 +288,9 @@ with st.sidebar:
         layup_deg = _parse_layup(layup_text)
         if not layup_deg:
             st.error("Layup is empty — enter at least one ply angle.")
-    except ValueError:
+    except ValueError as exc:
         layup_deg = []
-        st.error("Layup must be a comma-separated list of numbers.")
+        st.error(f"Invalid layup: {exc}")
 
     st.markdown("**Panel geometry**")
     col_lx, col_ly = st.columns(2)
@@ -303,9 +385,10 @@ with st.sidebar:
         )
         if uploaded is not None:
             try:
-                tmp = Path("/tmp") / uploaded.name
-                tmp.write_bytes(uploaded.getvalue())
-                damage_state = load_cscan_json(tmp)
+                # Parse in memory — never write an attacker-controlled
+                # filename to disk (path-traversal write primitive).
+                data = json.loads(uploaded.getvalue())
+                damage_state = damage_state_from_dict(data)
                 # Override dent / fiber-break with the sidebar inputs if the
                 # user has typed values; otherwise keep the file's values.
                 if dent_depth_mm > 0:
@@ -313,7 +396,7 @@ with st.sidebar:
                 if fb_radius_mm > 0:
                     damage_state = replace(damage_state, fiber_break_radius_mm=fb_radius_mm)
                 st.success(f"Loaded {len(damage_state.delaminations)} delamination(s)")
-            except CScanSchemaError as exc:
+            except (CScanSchemaError, json.JSONDecodeError, ValueError) as exc:
                 st.error(f"Invalid C-scan JSON: {exc}")
                 damage_state = None
         else:
@@ -443,23 +526,19 @@ def _live_onset_preview() -> str | None:
     """Olsson onset energy + DPA preview for the impact-driven path."""
     if input_mode != "Impact event" or panel is None or impact_event is None:
         return None
-    try:
-        mat = MATERIAL_LIBRARY[material_choice]
-        lam = Laminate(mat, layup_deg, ply_thickness_mm)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            E_onset = onset_energy(lam, panel, impact_event.impactor)
-            dmg = impact_to_damage(impact_event, lam, panel)
-        A_panel = panel.Lx_mm * panel.Ly_mm
-        pct = 100.0 * dmg.projected_damage_area_mm2 / A_panel if A_panel else 0.0
-        flag = " ⚠ SATURATED" if pct >= 79.0 else ""
-        return (
-            f"E_onset ≈ **{E_onset:.2f} J** · "
-            f"predicted DPA ≈ **{dmg.projected_damage_area_mm2:.0f} mm²** "
-            f"({pct:.1f}% of panel){flag}"
-        )
-    except Exception:
-        return None
+    return _onset_preview_cached(
+        material_choice,
+        tuple(layup_deg),
+        float(ply_thickness_mm),
+        float(panel.Lx_mm),
+        float(panel.Ly_mm),
+        panel.boundary,
+        float(impact_event.energy_J),
+        float(impact_event.impactor.diameter_mm),
+        impact_event.impactor.shape,
+        float(impact_event.mass_kg),
+        tuple(float(v) for v in impact_event.location_xy_mm),
+    )
 
 
 preview = _live_onset_preview()
@@ -499,7 +578,8 @@ if run_clicked:
                 payload = _run_analysis_cached(config_dict)
                 st.session_state["last_result"] = payload
             except Exception as exc:
-                st.exception(exc)
+                st.session_state["last_result"] = None
+                st.error(f"Analysis failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +587,12 @@ if run_clicked:
 # ---------------------------------------------------------------------------
 
 payload = st.session_state.get("last_result")
+
+if payload is not None and config_dict is not None and config_dict != payload["config_dict"]:
+    st.warning(
+        "Sidebar inputs changed since the last run — the results below are "
+        "stale. Click **Run analysis** to refresh."
+    )
 
 tabs = st.tabs(
     [
@@ -558,9 +644,12 @@ with tabs[1]:
     if payload is None:
         st.info("Run an analysis to see the damage map.")
     else:
-        cfg = payload["config"]
-        fig = plot_damage_map(payload["damage"], cfg.panel)
-        st.pyplot(fig, use_container_width=False)
+        try:
+            cfg = payload["config"]
+            fig = plot_damage_map(payload["damage"], cfg.panel)
+            st.pyplot(fig, use_container_width=False)
+        except Exception as exc:
+            st.error(f"Could not render the damage map: {exc}")
 
 
 # --- Knockdown Curve tab --------------------------------------------------
@@ -578,25 +667,23 @@ with tabs[2]:
             "Switch the sidebar to **Impact event** mode."
         )
     else:
-        cfg = payload["config"]
-        # Quick 5-point empirical sweep around the current energy. This is
-        # fast (sub-second) and matches what the old desktop GUI did
-        # automatically after every run.
-        base_E = cfg.impact.energy_J
-        sweep_E = np.linspace(max(1.0, base_E * 0.2), base_E * 2.0, 7).tolist()
-        with st.spinner("Computing empirical knockdown sweep…"):
-            df = sweep_energies(
-                replace(cfg, tier="empirical"),
-                sweep_E,
-                progress_callback=None,
+        try:
+            cfg = payload["config"]
+            # Quick empirical sweep around the current energy — fast
+            # (sub-second) and cached so it doesn't rerun every script pass.
+            base_E = cfg.impact.energy_J
+            sweep_E = tuple(np.linspace(max(1.0, base_E * 0.2), base_E * 2.0, 7).tolist())
+            with st.spinner("Computing empirical knockdown sweep…"):
+                df = _knockdown_sweep_cached(payload["config_dict"], sweep_E)
+            fig = plot_knockdown_curve(
+                df["energy_J"].tolist(),
+                df["knockdown"].tolist(),
+                tier_label="empirical",
             )
-        fig = plot_knockdown_curve(
-            df["energy_J"].tolist(),
-            df["knockdown"].tolist(),
-            tier_label="empirical",
-        )
-        st.pyplot(fig, use_container_width=False)
-        st.dataframe(df, use_container_width=True)
+            st.pyplot(fig, use_container_width=False)
+            st.dataframe(df, use_container_width=True)
+        except Exception as exc:
+            st.error(f"Could not compute the knockdown curve: {exc}")
 
 
 # --- 3D Damage tab --------------------------------------------------------
@@ -606,22 +693,22 @@ with tabs[3]:
     if payload is None:
         st.info("Run an analysis to see the 3D damaged mesh.")
     else:
-        cfg = payload["config"]
-        if cfg.mesh is None:
-            cfg_mesh = replace(cfg, mesh=MeshParams())
+        mesh = payload["mesh"]
+        if mesh is None:
+            st.warning("The display mesh could not be built for this configuration.")
         else:
-            cfg_mesh = cfg
-        with st.spinner("Building mesh…"):
-            mesh = build_fe_mesh(cfg_mesh, payload["damage"])
-        st.plotly_chart(
-            mesh_damage_figure(mesh, title="Damage factor (1 = pristine, 0 = damaged)"),
-            use_container_width=True,
-        )
-        st.caption(
-            f"Mesh: {mesh.n_elements:,} elements, {mesh.n_nodes:,} nodes. "
-            "Hot-colored regions sit inside a delamination or fiber-break "
-            "footprint."
-        )
+            try:
+                st.plotly_chart(
+                    mesh_damage_figure(mesh, title="Damage factor (1 = pristine, 0 = damaged)"),
+                    use_container_width=True,
+                )
+                st.caption(
+                    f"Mesh: {mesh.n_elements:,} elements, {mesh.n_nodes:,} nodes. "
+                    "Hot-colored regions sit inside a delamination or fiber-break "
+                    "footprint."
+                )
+            except Exception as exc:
+                st.error(f"Could not render the 3D mesh: {exc}")
 
 
 # --- Buckling tab ---------------------------------------------------------
@@ -657,41 +744,38 @@ with tabs[5]:
     if payload is None:
         st.info("Run an analysis to see the damage-severity heatmap.")
     else:
-        import math
-
-        cfg = payload["config"]
-        if cfg.mesh is None:
-            cfg_mesh = replace(cfg, mesh=MeshParams())
+        mesh = payload["mesh"]
+        if mesh is None:
+            st.warning("The display mesh could not be built for this configuration.")
         else:
-            cfg_mesh = cfg
-        with st.spinner("Projecting damage…"):
-            mesh = build_fe_mesh(cfg_mesh, payload["damage"])
-            in_plane_size = cfg_mesh.mesh.in_plane_size_mm
-            nx = max(1, math.ceil(cfg_mesh.panel.Lx_mm / in_plane_size))
-            ny = max(1, math.ceil(cfg_mesh.panel.Ly_mm / in_plane_size))
-            nz = len(cfg_mesh.layup_deg) * cfg_mesh.mesh.elements_per_ply
-            severity = (1.0 - mesh.damage_factors).reshape(nz, ny, nx).sum(axis=0)
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        im = ax.imshow(
-            severity,
-            origin="lower",
-            extent=(0, cfg_mesh.panel.Lx_mm, 0, cfg_mesh.panel.Ly_mm),
-            cmap="hot_r",
-            vmin=0.0,
-            vmax=max(1.0, float(severity.max())),
-        )
-        ax.set_xlabel("x [mm]")
-        ax.set_ylabel("y [mm]")
-        ax.set_title(
-            f"Damage severity — tier={payload['result_dict']['tier_used']}  "
-            f"KD={payload['result_dict']['knockdown']:.3f}"
-        )
-        ax.set_aspect("equal")
-        fig.colorbar(im, ax=ax, label="Stacked OOP loss")
-        fig.tight_layout()
-        st.pyplot(fig, use_container_width=False)
+            try:
+                cfg_mesh = payload["mesh_config"]
+                in_plane_size = cfg_mesh.mesh.in_plane_size_mm
+                nx = max(1, math.ceil(cfg_mesh.panel.Lx_mm / in_plane_size))
+                ny = max(1, math.ceil(cfg_mesh.panel.Ly_mm / in_plane_size))
+                nz = len(cfg_mesh.layup_deg) * cfg_mesh.mesh.elements_per_ply
+                severity = (1.0 - mesh.damage_factors).reshape(nz, ny, nx).sum(axis=0)
+                fig, ax = plt.subplots(figsize=(6, 5))
+                im = ax.imshow(
+                    severity,
+                    origin="lower",
+                    extent=(0, cfg_mesh.panel.Lx_mm, 0, cfg_mesh.panel.Ly_mm),
+                    cmap="hot_r",
+                    vmin=0.0,
+                    vmax=max(1.0, float(severity.max())),
+                )
+                ax.set_xlabel("x [mm]")
+                ax.set_ylabel("y [mm]")
+                ax.set_title(
+                    f"Damage severity — tier={payload['result_dict']['tier_used']}  "
+                    f"KD={payload['result_dict']['knockdown']:.3f}"
+                )
+                ax.set_aspect("equal")
+                fig.colorbar(im, ax=ax, label="Stacked OOP loss")
+                fig.tight_layout()
+                st.pyplot(fig, use_container_width=False)
+            except Exception as exc:
+                st.error(f"Could not render the damage-severity heatmap: {exc}")
 
 
 # --- Sweep tab ------------------------------------------------------------
