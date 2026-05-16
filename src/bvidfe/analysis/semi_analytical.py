@@ -21,7 +21,11 @@ import numpy as np
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.damage.state import DamageState, DelaminationEllipse
-from bvidfe.failure.soutis_openhole import soutis_cai, whitney_nuismer_tai
+from bvidfe.failure.soutis_openhole import (
+    lekhnitskii_kt_infinity,
+    soutis_cai,
+    whitney_nuismer_tai,
+)
 
 # Sublaminate buckling coefficient multiplier on the SSSS Rayleigh-Ritz result
 # for other panel boundary conditions. The delaminated sublaminate's edge
@@ -227,4 +231,5 @@ def semi_analytical_tai(
     deferred to v0.2.0.
     """
     dpa = damage.projected_damage_area_mm2
-    return whitney_nuismer_tai(lam.material, dpa, sigma_pristine_MPa)
+    Kt_inf = lekhnitskii_kt_infinity(lam)
+    return whitney_nuismer_tai(lam.material, dpa, sigma_pristine_MPa, Kt_inf)

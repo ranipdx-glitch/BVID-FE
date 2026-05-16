@@ -21,7 +21,11 @@ from bvidfe.analysis.semi_analytical import (
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import MATERIAL_LIBRARY, OrthotropicMaterial
 from bvidfe.damage.state import DamageState
-from bvidfe.failure.soutis_openhole import soutis_cai, whitney_nuismer_tai
+from bvidfe.failure.soutis_openhole import (
+    lekhnitskii_kt_infinity,
+    soutis_cai,
+    whitney_nuismer_tai,
+)
 from bvidfe.impact.mapping import impact_to_damage
 
 
@@ -162,4 +166,5 @@ class BvidAnalysis:
         mat = lam.material
         if self.config.loading == "compression":
             return soutis_cai(mat, dpa, A_panel, sigma_0)
-        return whitney_nuismer_tai(mat, dpa, sigma_0)
+        Kt_inf = lekhnitskii_kt_infinity(lam)
+        return whitney_nuismer_tai(mat, dpa, sigma_0, Kt_inf)
