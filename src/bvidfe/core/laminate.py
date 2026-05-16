@@ -141,7 +141,7 @@ class Laminate:
     """
 
     material: OrthotropicMaterial
-    layup_deg: list
+    layup_deg: list[float]
     ply_thickness_mm: float
 
     # Computed on post-init; stored as private attributes.

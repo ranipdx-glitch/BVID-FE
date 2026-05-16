@@ -172,7 +172,7 @@ my_mat = OrthotropicMaterial(
     E11=150e3, E22=9e3, nu12=0.32,
     G12=4.5e3, G13=4.5e3, G23=3.2e3,
     Xt=2200, Xc=1500, Yt=65, Yc=180, S12=85, S23=55,
-    G_Ic=0.27, G_IIc=0.85, rho=1.58e-6,
+    G_Ic=0.27, G_IIc=0.85, rho=1.58e-6,  # rho in kg/mm^3 (1.58 g/cm^3)
     # Optional impact/calibration constants (defaults for CFRP):
     olsson_alpha=0.8,     # DPA scaling
     soutis_k_s=2.5,       # Soutis CAI constant

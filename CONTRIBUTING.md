@@ -4,7 +4,7 @@ Thank you for your interest in contributing to BVID-FE!
 
 ## Reporting Bugs
 
-Open an [issue](https://github.com/elhajjar1/BVID-FE/issues) with:
+Open an [issue](https://github.com/ranipdx-glitch/BVID-FE/issues) with:
 - Python version and OS
 - Steps to reproduce the problem
 - Expected vs actual behavior
@@ -20,7 +20,7 @@ Open an issue describing:
 ## Development Setup
 
 ```bash
-git clone https://github.com/elhajjar1/BVID-FE.git
+git clone https://github.com/ranipdx-glitch/BVID-FE.git
 cd BVID-FE
 pip install -e ".[all]"
 pytest tests/ -v
