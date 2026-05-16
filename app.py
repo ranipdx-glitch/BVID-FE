@@ -81,6 +81,23 @@ IMPACTOR_SHAPES: list[str] = ["hemispherical", "flat", "conical"]
 
 
 MAX_PLIES = 400
+MAX_SWEEP_POINTS = 25
+DPA_SATURATION_PCT = 79.0
+
+_DF_FORMATS = {
+    "energy_J": "{:g}",
+    "knockdown": "{:.3f}",
+    "residual_MPa": "{:.1f}",
+    "pristine_MPa": "{:.1f}",
+    "dpa_mm2": "{:.1f}",
+    "dent_mm": "{:.3f}",
+}
+
+
+def _show_df(df: pd.DataFrame) -> None:
+    """Render a results DataFrame with sane float formatting."""
+    fmt = {c: f for c, f in _DF_FORMATS.items() if c in df.columns}
+    st.dataframe(df.style.format(fmt, na_rep="—"), use_container_width=True)
 
 
 def _parse_layup(text: str) -> list[float]:
@@ -137,10 +154,14 @@ def _run_analysis_cached(config_dict: dict) -> dict:
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
-def _knockdown_sweep_cached(config_dict: dict, energies: tuple[float, ...]) -> pd.DataFrame:
-    """Empirical knockdown sweep, cached so it doesn't rerun every script pass."""
-    cfg = replace(_config_from_dict(config_dict), tier="empirical")
-    return sweep_energies(cfg, list(energies), progress_callback=None)
+def _sweep_cached(config_dict: dict, tier: str, energies: tuple[float, ...]) -> pd.DataFrame:
+    """Energy sweep for a given tier, cached and resilient to per-point failures.
+
+    ``on_error="warn"`` makes the library return NaN rows for points that
+    fail instead of aborting the whole sweep.
+    """
+    cfg = replace(_config_from_dict(config_dict), tier=tier)
+    return sweep_energies(cfg, list(energies), on_error="warn", progress_callback=None)
 
 
 @st.cache_data(show_spinner=False, max_entries=32)
@@ -175,7 +196,7 @@ def _onset_preview_cached(
             dmg = impact_to_damage(ev, lam, pan)
         A_panel = Lx_mm * Ly_mm
         pct = 100.0 * dmg.projected_damage_area_mm2 / A_panel if A_panel else 0.0
-        flag = " ⚠ SATURATED" if pct >= 79.0 else ""
+        flag = " ⚠ SATURATED" if pct >= DPA_SATURATION_PCT else ""
         return (
             f"E_onset ≈ **{E_onset:.2f} J** · "
             f"predicted DPA ≈ **{dmg.projected_damage_area_mm2:.0f} mm²** "
@@ -511,7 +532,6 @@ if config_valid:
             else {
                 "elements_per_ply": mesh_params.elements_per_ply,
                 "in_plane_size_mm": mesh_params.in_plane_size_mm,
-                "cohesive_zone_factor": mesh_params.cohesive_zone_factor,
             }
         ),
     }
@@ -674,14 +694,15 @@ with tabs[2]:
             base_E = cfg.impact.energy_J
             sweep_E = tuple(np.linspace(max(1.0, base_E * 0.2), base_E * 2.0, 7).tolist())
             with st.spinner("Computing empirical knockdown sweep…"):
-                df = _knockdown_sweep_cached(payload["config_dict"], sweep_E)
+                df = _sweep_cached(payload["config_dict"], "empirical", sweep_E)
+            ok = df.dropna(subset=["knockdown"])
             fig = plot_knockdown_curve(
-                df["energy_J"].tolist(),
-                df["knockdown"].tolist(),
+                ok["energy_J"].tolist(),
+                ok["knockdown"].tolist(),
                 tier_label="empirical",
             )
             st.pyplot(fig, use_container_width=False)
-            st.dataframe(df, use_container_width=True)
+            _show_df(df)
         except Exception as exc:
             st.error(f"Could not compute the knockdown curve: {exc}")
 
@@ -730,11 +751,14 @@ with tabs[4]:
             df_eigs = pd.DataFrame(
                 {
                     "mode": list(range(1, len(eigs) + 1)),
-                    "eigenvalue": eigs,
+                    "buckling load factor [-]": eigs,
                 }
             )
             st.bar_chart(df_eigs.set_index("mode"))
-            st.dataframe(df_eigs, use_container_width=True)
+            st.dataframe(
+                df_eigs.style.format({"buckling load factor [-]": "{:.4g}"}),
+                use_container_width=True,
+            )
 
 
 # --- Damage Severity tab --------------------------------------------------
@@ -805,41 +829,64 @@ with tabs[6]:
             except ValueError:
                 st.error("Energies must be a comma-separated list of numbers.")
                 energies = []
+            if energies and not all(math.isfinite(e) and e > 0 for e in energies):
+                st.error("Energies must be finite and positive.")
+                energies = []
+            if len(energies) > MAX_SWEEP_POINTS:
+                st.error(
+                    f"Sweep is capped at {MAX_SWEEP_POINTS} energy points "
+                    f"(got {len(energies)}). Shorten the list."
+                )
+                energies = []
+            if energies and sweep_tier == "fe3d":
+                try:
+                    stats = estimate_fe_mesh_size(
+                        replace(_config_from_dict(config_dict), tier="fe3d")
+                    )
+                except Exception as exc:
+                    st.error(f"Failed to estimate fe3d mesh size: {exc}")
+                    energies = []
+                else:
+                    if stats["n_dof"] > FE3D_MAX_DOF:
+                        st.error(
+                            f"fe3d mesh has {stats['n_elements']:,} elements "
+                            f"({stats['n_dof']:,} DOFs), exceeding the safe cap "
+                            f"of {FE3D_MAX_DOF:,}. Increase **In-plane size** or "
+                            f"reduce **Elements per ply** in the sidebar."
+                        )
+                        energies = []
             if energies:
-                base_cfg = _config_from_dict(config_dict)
-                base_cfg = replace(base_cfg, tier=sweep_tier)
-                progress = st.progress(0.0)
-                rows = []
-                for i, E in enumerate(energies):
-                    cfg_i = replace(
-                        base_cfg,
-                        impact=replace(base_cfg.impact, energy_J=E),
-                    )
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        res = BvidAnalysis(cfg_i).run()
-                    rows.append(
-                        {
-                            "energy_J": E,
-                            "knockdown": res.knockdown,
-                            "residual_MPa": res.residual_strength_MPa,
-                            "dpa_mm2": res.dpa_mm2,
-                        }
-                    )
-                    progress.progress((i + 1) / len(energies))
-                df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True)
-                fig = plot_knockdown_curve(
-                    df["energy_J"].tolist(),
-                    df["knockdown"].tolist(),
-                    tier_label=sweep_tier,
-                )
-                st.pyplot(fig, use_container_width=False)
-                csv_buf = io.StringIO()
-                df.to_csv(csv_buf, index=False)
-                st.download_button(
-                    "Download sweep CSV",
-                    data=csv_buf.getvalue(),
-                    file_name=f"bvidfe_sweep_{sweep_tier}.csv",
-                    mime="text/csv",
-                )
+                try:
+                    with st.spinner(f"Running {len(energies)}-point {sweep_tier} sweep…"):
+                        df = _sweep_cached(config_dict, sweep_tier, tuple(energies))
+                except Exception as exc:
+                    st.error(f"Sweep failed: {exc}")
+                else:
+                    if df["knockdown"].isna().all():
+                        st.error(
+                            "Every sweep point failed — check the sidebar "
+                            "configuration and the energy values."
+                        )
+                    else:
+                        failed = df.loc[df["knockdown"].isna(), "energy_J"].tolist()
+                        if failed:
+                            st.warning(
+                                "Some sweep points failed and are blank: "
+                                + ", ".join(f"{e:g} J" for e in failed)
+                            )
+                        _show_df(df)
+                        ok = df.dropna(subset=["knockdown"])
+                        fig = plot_knockdown_curve(
+                            ok["energy_J"].tolist(),
+                            ok["knockdown"].tolist(),
+                            tier_label=sweep_tier,
+                        )
+                        st.pyplot(fig, use_container_width=False)
+                        csv_buf = io.StringIO()
+                        df.to_csv(csv_buf, index=False)
+                        st.download_button(
+                            "Download sweep CSV",
+                            data=csv_buf.getvalue(),
+                            file_name=f"bvidfe_sweep_{sweep_tier}.csv",
+                            mime="text/csv",
+                        )

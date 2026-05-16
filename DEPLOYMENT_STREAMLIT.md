@@ -25,7 +25,7 @@ Streamlit Cloud reads from a GitHub repository. Make sure your branch is
 pushed to GitHub and you know the branch name. For this repo:
 
 ```
-ranipdx-glitch/bvid-fe
+ranipdx-glitch/BVID-FE
 ```
 
 If you've been working on a feature branch, either deploy directly from
@@ -42,7 +42,7 @@ that branch or merge to `main` first.
 
 1. Click **Create app** (top right) → **Deploy a public app from GitHub**.
 2. Fill in:
-   - **Repository:** `ranipdx-glitch/bvid-fe`
+   - **Repository:** `ranipdx-glitch/BVID-FE`
    - **Branch:** `main` (or your feature branch)
    - **Main file path:** `app.py`
    - **App URL:** pick a sub-domain like `bvidfe.streamlit.app`
