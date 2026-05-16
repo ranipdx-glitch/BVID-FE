@@ -37,3 +37,27 @@ def test_D_eff_positive():
     m = MATERIAL_LIBRARY["IM7/8552"]
     lam = Laminate(material=m, layup_deg=[0, 45, -45, 90] * 4, ply_thickness_mm=0.152)
     assert lam.flexural_rigidity_Deff() > 0
+
+
+def test_effective_engineering_constants_valid_laminate_finite_positive():
+    """Issue #21 regression: the new ill-conditioning guard must NOT
+    false-trigger on a normal laminate."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    Ex, Ey, Gxy, nuxy = lam.effective_engineering_constants()
+    for v in (Ex, Ey, Gxy):
+        assert np.isfinite(v) and v > 0.0
+    assert np.isfinite(nuxy)
+
+
+def test_effective_engineering_constants_raises_on_singular_A():
+    """Issue #21: a numerically singular A must raise loudly instead of
+    silently returning NaN/Inf that corrupts downstream stress recovery."""
+    import pytest
+
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    # Corrupt the cached A to a (nearly) singular matrix.
+    lam._A = np.full((3, 3), 1e-14)
+    with pytest.raises(ValueError, match="ill-conditioned"):
+        lam.effective_engineering_constants()

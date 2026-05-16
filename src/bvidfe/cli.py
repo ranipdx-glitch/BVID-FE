@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bvidfe",
         description="BVID-FE: Barely Visible Impact Damage residual-strength analysis.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
         "--version",
@@ -91,8 +92,17 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_parse_panel,
         help="Panel dimensions as LxY in millimeters, e.g. 150x100",
     )
-    p.add_argument("--loading", choices=["compression", "tension"])
-    p.add_argument("--tier", default="empirical", choices=["empirical", "semi_analytical", "fe3d"])
+    p.add_argument(
+        "--loading",
+        choices=["compression", "tension"],
+        help="Load case: compression-after-impact or tension-after-impact",
+    )
+    p.add_argument(
+        "--tier",
+        default="empirical",
+        choices=["empirical", "semi_analytical", "fe3d"],
+        help="Analysis fidelity tier",
+    )
     p.add_argument(
         "--energy",
         type=_positive_float,

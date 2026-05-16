@@ -43,3 +43,25 @@ def test_empty_when_single_ply():
 def test_empty_when_nonpositive_target():
     assert distribute_damage([0, 90, 0], 0.0, 0.3, 0.0) == []
     assert distribute_damage([0, 90, 0], -5.0, 0.3, 0.0) == []
+
+
+def test_back_face_growth_axiom():
+    """Issue #16: delaminations must grow toward the back face (the
+    experimentally observed BVID signature encoded by _relative_size).
+
+    Constant-angle layup -> aspect_ratio == 1 at every interface, so any
+    size difference is purely the back-face growth ramp. A regression that
+    flipped or zeroed the ramp slope would still pass the existing
+    DPA-conservation / aspect-ratio tests but fail this one.
+    """
+    ellipses = distribute_damage(
+        [0] * 6,
+        target_dpa_mm2=600.0,
+        dent_depth_mm=0.3,
+        fiber_break_radius_mm=0.0,
+        centroid_mm=(75.0, 50.0),
+    )
+    ellipses.sort(key=lambda e: e.interface_index)
+    # Model ratio is (0.3 + 0.7*1) / (0.3 + 0.7*(1/n)) ~= 2.3; assert >= 2x.
+    assert ellipses[-1].major_mm > 2.0 * ellipses[0].major_mm
+    assert ellipses[-1].minor_mm > 2.0 * ellipses[0].minor_mm

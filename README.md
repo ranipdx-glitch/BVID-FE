@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-309%20passing-brightgreen.svg)](https://github.com/elhajjar1/BVID-FE/actions)
+[![Tests](https://github.com/ranipdx-glitch/BVID-FE/actions/workflows/tests.yml/badge.svg)](https://github.com/ranipdx-glitch/BVID-FE/actions/workflows/tests.yml)
 
 A Python library for predicting residual strength and stiffness of fiber-reinforced composite laminates containing Barely Visible Impact Damage (BVID).
 
@@ -94,13 +94,11 @@ print(result.summary())
 ### Inspection-driven path (C-scan import)
 
 ```python
-import json
 from bvidfe.damage.io import load_cscan_json
 from bvidfe.analysis import AnalysisConfig, BvidAnalysis
 from bvidfe.core.geometry import PanelGeometry
 
-with open("scan.json") as f:
-    damage_state = load_cscan_json(json.load(f))
+damage_state = load_cscan_json("scan.json")
 
 cfg = AnalysisConfig(
     material="AS4/3501-6",
@@ -121,9 +119,9 @@ print(f"Knockdown: {result.knockdown:.3f}")
 from bvidfe.sweep.parametric_sweep import sweep_energies
 
 results_df = sweep_energies(
+    cfg,
     energies_J=[10, 20, 30, 40, 50],
-    base_config=cfg,
-    output_csv="knockdown_vs_energy.csv",
+    csv_path="knockdown_vs_energy.csv",
 )
 ```
 
@@ -203,7 +201,7 @@ If you use BVID-FE in your research, please cite:
   year      = {2026},
   version   = {0.1.0-alpha},
   publisher = {GitHub},
-  url       = {https://github.com/elhajjar1/BVID-FE},
+  url       = {https://github.com/ranipdx-glitch/BVID-FE},
   note      = {University of Wisconsin-Milwaukee}
 }
 ```

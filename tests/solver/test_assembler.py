@@ -103,3 +103,28 @@ def test_assemble_summation_of_overlapping_dofs():
     Krr = Kd[np.ix_(free, free)]
     eigs = np.linalg.eigvalsh(Krr)
     assert eigs.min() > 0
+
+
+def test_assembly_sums_shared_dof_contributions_exactly():
+    """Issue #48: a DOF shared by two elements must hold the *sum* of both
+    element stiffness contributions (a +=, not an overwrite), and a DOF
+    touched by only one element must hold exactly that one contribution."""
+    elems, dofs, n_dof = _two_element_system()
+    elem1, elem2 = elems
+    Ke1 = elem1.stiffness_matrix()
+    Ke2 = elem2.stiffness_matrix()
+    K = assemble_global_stiffness(elems, dofs, n_dof).toarray()
+
+    # Global node 1 is shared: local index 1 in element 1, local index 0 in
+    # element 2 (see _two_element_system: e2_nodes[0] == 1). Its global DOFs
+    # are [3, 4, 5].
+    g = [3, 4, 5]
+    e1_loc = [3, 4, 5]  # 3*local_idx(1) + {0,1,2}
+    e2_loc = [0, 1, 2]  # 3*local_idx(0) + {0,1,2}
+    expected_shared = Ke1[np.ix_(e1_loc, e1_loc)] + Ke2[np.ix_(e2_loc, e2_loc)]
+    assert np.allclose(K[np.ix_(g, g)], expected_shared, rtol=0, atol=1e-9)
+
+    # Global node 0 belongs only to element 1 (local index 0) -> single
+    # contribution, must NOT be doubled.
+    g0 = [0, 1, 2]
+    assert np.allclose(K[np.ix_(g0, g0)], Ke1[np.ix_([0, 1, 2], [0, 1, 2])], rtol=0, atol=1e-9)

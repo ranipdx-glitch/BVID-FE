@@ -25,6 +25,16 @@ from bvidfe.impact.dent_model import dent_depth_mm, fiber_break_radius_mm
 from bvidfe.impact.olsson import onset_energy
 from bvidfe.impact.shape_templates import distribute_damage
 
+
+class SmallMassQuasiStaticWarning(UserWarning):
+    """The impactor is comparable to or lighter than the plate, so Olsson's
+    quasi-static threshold model may underpredict damage."""
+
+
+class DPACapClipWarning(UserWarning):
+    """The Olsson-predicted DPA exceeded the panel-area cap and was clipped."""
+
+
 # Impactor-shape footprint multiplier on target DPA. Empirical: flat-ended
 # impactors spread the contact force over a larger area and produce wider
 # delamination footprints; conical impactors concentrate penetration
@@ -85,11 +95,8 @@ def _dynamic_amplification_factor(
     than the plate (m_ratio < 1 — the small-mass regime where the Olsson
     quasi-static threshold can underpredict damage by 30%+).
 
-    Note on units: ``OrthotropicMaterial.rho`` is specified in kg/mm^3
-    (e.g. 1.57e-6 for CFRP, matching 1.57 g/cm^3). The docstring in
-    ``core/material.py`` says "t/mm^3" for a hypothetical SI-mm-N-s mass
-    unit, but the actual numerical values follow the kg/mm^3 convention;
-    we treat them as kg/mm^3 to compute a physically meaningful m_ratio.
+    ``OrthotropicMaterial.rho`` is in kg/mm^3 (e.g. 1.57e-6 for CFRP,
+    matching 1.57 g/cm^3); the m_ratio below is therefore in consistent kg.
     """
     rho_kg_per_mm3 = lam.material.rho
     m_plate_eff_kg = rho_kg_per_mm3 * panel.Lx_mm * panel.Ly_mm * lam.thickness_mm
@@ -140,7 +147,7 @@ def impact_to_damage(event: ImpactEvent, lam: Laminate, panel: PanelGeometry) ->
             f"than the plate's effective mass (ratio = {m_ratio:.2f}); Olsson's "
             f"quasi-static threshold model may underpredict damage in this "
             f"regime. Predictions should be interpreted qualitatively.",
-            UserWarning,
+            SmallMassQuasiStaticWarning,
             stacklevel=2,
         )
     # Impactor tip shape footprint (flat spreads damage; conical concentrates)
@@ -162,7 +169,7 @@ def impact_to_damage(event: ImpactEvent, lam: Laminate, panel: PanelGeometry) ->
             f"area ({A_cap:.0f} mm^2). Clipping to {A_cap:.0f} mm^2. The impact "
             f"energy may exceed the panel's capacity to contain damage without "
             f"edge effects; consider a larger panel or lower energy.",
-            UserWarning,
+            DPACapClipWarning,
             stacklevel=2,
         )
         dpa_target = A_cap

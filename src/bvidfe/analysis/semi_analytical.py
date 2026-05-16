@@ -14,6 +14,7 @@ sublaminates because it buckles first.
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -21,7 +22,11 @@ import numpy as np
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.damage.state import DamageState, DelaminationEllipse
-from bvidfe.failure.soutis_openhole import soutis_cai, whitney_nuismer_tai
+from bvidfe.failure.soutis_openhole import (
+    lekhnitskii_kt_infinity,
+    soutis_cai,
+    whitney_nuismer_tai,
+)
 
 # Sublaminate buckling coefficient multiplier on the SSSS Rayleigh-Ritz result
 # for other panel boundary conditions. The delaminated sublaminate's edge
@@ -36,6 +41,21 @@ _BOUNDARY_BUCKLING_FACTOR: dict[str, float] = {
     "clamped": 1.9,
     "free": 0.5,
 }
+
+# Maximum sublaminate aspect ratio (major / minor semi-axis) the closed-form
+# Rayleigh-Ritz solution is trusted over. Slender peanut-template ellipses
+# (e.g. b ~ 0.01 mm, a ~ 5 mm) drive the (a/b)^4 term to ~1e16, so the
+# buckling stress overflows the Soutis empirical bound and the buckling
+# channel goes silently inert. We clip the aspect ratio to this value and
+# emit a ``DegenerateThinSublaminateWarning`` so the degenerate-thin
+# condition is visible rather than masquerading as a clean empirical-tier
+# result.
+_MAX_SUBLAMINATE_ASPECT: float = 50.0
+
+
+class DegenerateThinSublaminateWarning(UserWarning):
+    """The buckling sublaminate is so slender that its aspect ratio was
+    clipped to the trusted domain; the buckling channel may be inactive."""
 
 
 def _sublaminate_D_matrix(
@@ -92,6 +112,14 @@ def sublaminate_buckling_load(
     boundary : str
         One of ``"simply_supported"``, ``"clamped"``, ``"free"``.
 
+    The ellipse aspect ratio ``a / b`` is clipped to ``_MAX_SUBLAMINATE_ASPECT``
+    (50) before evaluating the eigenvalue. Slender peanut-template ellipses
+    would otherwise drive the ``(a/b)^4`` term to ~1e16 N/mm, overflowing the
+    Soutis empirical bound so ``semi_analytical_cai`` silently returns the
+    empirical result with the buckling channel inert. When the clip fires a
+    :class:`DegenerateThinSublaminateWarning` is emitted so the degenerate
+    condition is visible.
+
     Returns
     -------
     float
@@ -118,16 +146,32 @@ def sublaminate_buckling_load(
     if a <= 0 or b <= 0:
         return float("inf")
 
+    # Reformulate in terms of the aspect ratio so a slender (b -> 0) ellipse
+    # cannot blow the (a/b)^4 term past the Soutis bound and silently disable
+    # the buckling channel. Clip to the trusted domain and surface the clip.
+    aspect = a / b
+    if aspect > _MAX_SUBLAMINATE_ASPECT:
+        warnings.warn(
+            f"Sublaminate ellipse aspect ratio (a/b = {aspect:.1f}) exceeds the "
+            f"trusted Rayleigh-Ritz domain ({_MAX_SUBLAMINATE_ASPECT:.0f}); "
+            f"clipping to {_MAX_SUBLAMINATE_ASPECT:.0f}. The sublaminate-buckling "
+            f"channel is degenerate for this thin slice and may not constrain "
+            f"the residual strength; the empirical Soutis tier likely governs.",
+            DegenerateThinSublaminateWarning,
+            stacklevel=2,
+        )
+        aspect = _MAX_SUBLAMINATE_ASPECT
+
     # Minimum over (m, n) in 1..5 for uniaxial compression N0_x:
-    # N_cr(m,n) = (pi^2 / a^2) * [D11*m^4 + 2*(D12+2*D66)*(m*a/b)^2*n^2 + D22*(a*n/b)^4] / m^2
+    # N_cr(m,n) = (pi^2 / a^2) * [D11*m^4 + 2*(D12+2*D66)*(m*aspect)^2*n^2 + D22*(aspect*n)^4] / m^2
     pi2 = math.pi * math.pi
     best = float("inf")
     for m_mode in range(1, 6):
         for n_mode in range(1, 6):
             num = (
                 D11 * m_mode**4
-                + 2.0 * (D12 + 2.0 * D66) * (m_mode * a / b) ** 2 * n_mode**2
-                + D22 * (a * n_mode / b) ** 4
+                + 2.0 * (D12 + 2.0 * D66) * (m_mode * aspect) ** 2 * n_mode**2
+                + D22 * (aspect * n_mode) ** 4
             )
             N_mn = (pi2 / a**2) * num / m_mode**2
             if N_mn < best:
@@ -227,4 +271,5 @@ def semi_analytical_tai(
     deferred to v0.2.0.
     """
     dpa = damage.projected_damage_area_mm2
-    return whitney_nuismer_tai(lam.material, dpa, sigma_pristine_MPa)
+    Kt_inf = lekhnitskii_kt_infinity(lam)
+    return whitney_nuismer_tai(lam.material, dpa, sigma_pristine_MPa, Kt_inf)

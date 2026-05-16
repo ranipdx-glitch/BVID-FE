@@ -128,3 +128,77 @@ def test_degenerate_element_error_is_a_value_error():
     """Defensive code that catches generic ValueError must still see the new
     error class — we do not want to break existing exception handlers."""
     assert issubclass(DegenerateElementError, ValueError)
+
+
+def _distorted_hex_nodes():
+    """A non-affine, irregularly distorted 8-node hex (no two faces parallel).
+
+    The constant-strain patch test must hold for *any* admissible element
+    shape, not just the unit cube — that is the whole point of the test.
+    """
+    return np.array(
+        [
+            [0.00, 0.00, 0.00],
+            [1.10, 0.05, -0.05],
+            [1.20, 1.15, 0.10],
+            [0.08, 0.95, -0.10],
+            [-0.05, 0.05, 1.05],
+            [1.00, -0.05, 1.15],
+            [1.15, 1.05, 1.20],
+            [0.05, 1.10, 0.95],
+        ],
+        dtype=float,
+    )
+
+
+def _u_from_strain_field(node_coords, exx=0.0, eyy=0.0, ezz=0.0, gxy=0.0):
+    """Element DOF vector (24,) for a spatially constant strain field.
+
+    u_x = exx*x + gxy*y,  u_y = eyy*y,  u_z = ezz*z
+    => Voigt strain [exx, eyy, ezz, 0, 0, gxy] everywhere (gxy = engineering
+    shear 2*e_xy, matching the Hex8 B-matrix Voigt convention).
+    """
+    u = np.zeros(24)
+    for k, (x, y, z) in enumerate(node_coords):
+        u[3 * k + 0] = exx * x + gxy * y
+        u[3 * k + 1] = eyy * y
+        u[3 * k + 2] = ezz * z
+    return u
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        (dict(exx=1e-3), [1e-3, 0, 0, 0, 0, 0]),
+        (dict(eyy=2e-3), [0, 2e-3, 0, 0, 0, 0]),
+        (dict(ezz=-1.5e-3), [0, 0, -1.5e-3, 0, 0, 0]),
+        (dict(gxy=3e-3), [0, 0, 0, 0, 0, 3e-3]),
+    ],
+)
+def test_hex8_constant_strain_patch_test_unit_cube(field, expected):
+    """B @ u_const must reproduce the imposed Voigt strain at every Gauss point."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    elem = Hex8Element(_unit_cube_nodes(), m)
+    u = _u_from_strain_field(elem.node_coords, **field)
+    strains = elem.strain_at_gauss_points(u)  # (n_gp, 6)
+    for gp_strain in strains:
+        assert np.allclose(gp_strain, expected, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        (dict(exx=1e-3), [1e-3, 0, 0, 0, 0, 0]),
+        (dict(gxy=3e-3), [0, 0, 0, 0, 0, 3e-3]),
+    ],
+)
+def test_hex8_constant_strain_patch_test_distorted_element(field, expected):
+    """The patch test must also pass on an arbitrarily distorted element —
+    this is the property that guarantees correct stress recovery on real
+    (non-cubic) meshes."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    elem = Hex8Element(_distorted_hex_nodes(), m)
+    u = _u_from_strain_field(elem.node_coords, **field)
+    strains = elem.strain_at_gauss_points(u)
+    for gp_strain in strains:
+        assert np.allclose(gp_strain, expected, atol=1e-10)
