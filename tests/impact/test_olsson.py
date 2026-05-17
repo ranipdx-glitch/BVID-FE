@@ -6,7 +6,13 @@ import pytest
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import MATERIAL_LIBRARY
-from bvidfe.impact.olsson import NAVIER_N, _k_bending_ssss, onset_energy, threshold_load
+from bvidfe.impact.olsson import (
+    NAVIER_N,
+    _k_bending_ssss,
+    _navier_basis_ssss,
+    onset_energy,
+    threshold_load,
+)
 
 
 def test_threshold_load_scales_with_sqrt_G_IIc():
@@ -81,3 +87,44 @@ def test_k_bending_ssss_interior_returns_finite_positive():
     k = _k_bending_ssss(lam, pan, 75.0, 50.0)
     assert math.isfinite(k)
     assert k > 0.0
+
+
+def test_k_bending_ssss_cached_matches_scalar_navier_reference():
+    """Issue #56: the cached/vectorised Navier sum must equal the original
+    scalar double-loop implementation to machine epsilon."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    pan = PanelGeometry(150, 100)
+    x0, y0 = 70.0, 40.0
+    _, _, D = lam.abd_matrices()
+    D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
+    a, b = pan.Lx_mm, pan.Ly_mm
+    w_over_P = 0.0
+    for mm in range(1, NAVIER_N + 1):
+        for nn in range(1, NAVIER_N + 1):
+            s = math.sin(mm * math.pi * x0 / a) * math.sin(nn * math.pi * y0 / b)
+            dmn = (
+                D11 * (mm * math.pi / a) ** 4
+                + 2 * (D12 + 2 * D66) * (mm * math.pi / a) ** 2 * (nn * math.pi / b) ** 2
+                + D22 * (nn * math.pi / b) ** 4
+            )
+            w_over_P += s * s / dmn
+    w_over_P *= 4.0 / (a * b)
+    reference = 1.0 / w_over_P
+    assert _k_bending_ssss(lam, pan, x0, y0) == pytest.approx(reference, rel=1e-12, abs=0.0)
+
+
+def test_navier_basis_is_cached_keyed_on_geometry_not_laminate():
+    """Issue #56: identical (a, b, x0, y0, n_modes) reuse the cached basis
+    even across different laminates — the expensive trig grid is computed once."""
+    _navier_basis_ssss.cache_clear()
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam_a = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    lam_b = Laminate(m, [0, 90] * 6, 0.152)  # different D, same geometry/location
+    pan = PanelGeometry(150, 100)
+    _k_bending_ssss(lam_a, pan, 60.0, 40.0)
+    _k_bending_ssss(lam_b, pan, 60.0, 40.0)
+    _k_bending_ssss(lam_a, pan, 60.0, 40.0)
+    info = _navier_basis_ssss.cache_info()
+    assert info.misses == 1  # basis trig grid computed exactly once
+    assert info.hits >= 2  # later identical-geometry calls reuse it

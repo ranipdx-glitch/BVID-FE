@@ -33,6 +33,9 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import lru_cache
+
+import numpy as np
 
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
@@ -59,6 +62,27 @@ _BOUNDARY_BENDING_FACTOR: dict[str, float] = {
 _CONICAL_HALF_ANGLE_DEG: float = 30.0
 
 
+@lru_cache(maxsize=64)
+def _navier_basis_ssss(
+    a: float, b: float, x0: float, y0: float, n_modes: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Cached SSSS Navier modal basis for a point load at ``(x0, y0)``.
+
+    Returns ``(sin2_m, sin2_n, kx, ky)`` where ``kx = m*pi/a``,
+    ``ky = n*pi/b`` and ``sin2_* = sin(k*coord)**2`` for ``m, n`` in
+    ``1..n_modes``. These depend only on panel size, impact location and
+    mode count — not on the laminate ``D`` matrix — so a parametric sweep
+    that holds geometry + location fixed (e.g. an energy sweep) reuses the
+    ``~n_modes**2`` trig evaluations instead of recomputing them per point.
+    """
+    idx = np.arange(1, n_modes + 1, dtype=float)
+    kx = idx * np.pi / a
+    ky = idx * np.pi / b
+    sin2_m = np.sin(kx * x0) ** 2
+    sin2_n = np.sin(ky * y0) ** 2
+    return sin2_m, sin2_n, kx, ky
+
+
 def _k_bending_ssss(
     lam: Laminate,
     pan: PanelGeometry,
@@ -82,18 +106,17 @@ def _k_bending_ssss(
             f"impact location ({x0}, {y0}) must lie strictly inside the panel "
             f"(0, {a}) x (0, {b}); SSSS bending compliance is singular at the boundary."
         )
-    w_over_P = 0.0
-    for m in range(1, n_modes + 1):
-        for n in range(1, n_modes + 1):
-            sin_mx = math.sin(m * math.pi * x0 / a)
-            sin_ny = math.sin(n * math.pi * y0 / b)
-            Dmn = (
-                D11 * (m * math.pi / a) ** 4
-                + 2 * (D12 + 2 * D66) * (m * math.pi / a) ** 2 * (n * math.pi / b) ** 2
-                + D22 * (n * math.pi / b) ** 4
-            )
-            w_over_P += (sin_mx * sin_ny) ** 2 / Dmn
-    w_over_P *= 4.0 / (a * b)
+    sin2_m, sin2_n, kx, ky = _navier_basis_ssss(a, b, x0, y0, n_modes)
+    kx2 = kx**2
+    ky2 = ky**2
+    # D_mn = D11*kx^4 + 2*(D12+2*D66)*kx^2*ky^2 + D22*ky^4  (outer over m, n)
+    Dmn = (
+        D11 * kx2[:, None] ** 2
+        + 2.0 * (D12 + 2.0 * D66) * kx2[:, None] * ky2[None, :]
+        + D22 * ky2[None, :] ** 2
+    )
+    numer = sin2_m[:, None] * sin2_n[None, :]
+    w_over_P = (4.0 / (a * b)) * float(np.sum(numer / Dmn))
     return 1.0 / w_over_P
 
 
