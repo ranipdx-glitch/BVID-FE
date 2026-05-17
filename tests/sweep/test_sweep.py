@@ -1,8 +1,10 @@
+import warnings
+
 import pandas as pd
 
 from bvidfe.analysis import AnalysisConfig
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
-from bvidfe.impact.mapping import ImpactEvent
+from bvidfe.impact.mapping import DPACapClipWarning, ImpactEvent
 from bvidfe.sweep.parametric_sweep import (
     sweep_energies,
     sweep_layups,
@@ -187,3 +189,20 @@ def test_sweep_column_schema_is_deterministic():
 
     df_t = sweep_thicknesses(cfg, ply_thicknesses_mm=[0.125, 0.152])
     assert list(df_t.columns) == ["ply_thickness_mm", *expected_results]
+
+
+def test_sweep_dedupes_dpa_cap_warning_to_once_per_sweep():
+    """Issue #55: the DPA-cap diagnostic must fire once for the whole sweep,
+    not once per point. A small panel + high energies makes every iteration
+    exceed the 80% DPA clip; each warning's message embeds the per-point DPA
+    value, so Python's 'once' filter (keyed on message text) cannot collapse
+    them — _dedupe_impact_warnings() collapses by category instead."""
+    cfg = _base_impact_cfg(panel=PanelGeometry(40, 30))
+    energies = [80.0, 100.0, 120.0, 140.0, 160.0]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        df = sweep_energies(cfg, energies_J=energies)
+    assert len(df) == len(energies)
+    dpa_warnings = [w for w in caught if issubclass(w.category, DPACapClipWarning)]
+    # Without per-category dedup this equals len(energies) (one per point).
+    assert len(dpa_warnings) == 1

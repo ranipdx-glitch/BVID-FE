@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import math
 import warnings
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Iterator, List, Optional, Sequence
 
 import pandas as pd
 
@@ -40,11 +41,38 @@ _ProgressCallback = Callable[[int, int], None]
 _ON_ERROR_VALUES = ("raise", "skip", "warn")
 
 
-def _configure_sweep_warnings() -> None:
-    """Collapse per-iteration impact-mapping warnings to one per process so a
-    long sweep is not flooded by the same small-mass / DPA-cap diagnostic."""
-    for category in (SmallMassQuasiStaticWarning, DPACapClipWarning):
-        warnings.filterwarnings("once", category=category)
+_DEDUP_WARNING_CATEGORIES = (SmallMassQuasiStaticWarning, DPACapClipWarning)
+
+
+@contextmanager
+def _dedupe_impact_warnings() -> Iterator[None]:
+    """Emit each impact-mapping diagnostic at most once for the whole sweep.
+
+    ``impact_to_damage`` raises ``SmallMassQuasiStaticWarning`` /
+    ``DPACapClipWarning`` once per sweep point. Python's ``"once"`` /
+    ``"default"`` filter actions key on the *message text*, which here
+    embeds per-point values (the predicted DPA, the mass ratio), so the
+    filter never recognises them as duplicates and the diagnostic floods
+    stderr once per iteration. Dedupe by *category* explicitly instead.
+    Non-impact warnings (e.g. the ``on_error="warn"`` per-failure
+    ``UserWarning``) pass through unchanged.
+    """
+    seen: set[type] = set()
+    with warnings.catch_warnings():
+        outer_show = warnings.showwarning
+        # See every warning so we can decide per category; the original
+        # showwarning is still used for the first of each / pass-through.
+        warnings.simplefilter("always")
+
+        def _show(message, category, filename, lineno, file=None, line=None):
+            if issubclass(category, _DEDUP_WARNING_CATEGORIES):
+                if category in seen:
+                    return
+                seen.add(category)
+            outer_show(message, category, filename, lineno, file, line)
+
+        warnings.showwarning = _show
+        yield
 
 
 def _run_one(cfg: AnalysisConfig) -> dict:
@@ -141,19 +169,19 @@ def sweep_energies(
     """
     if base_cfg.impact is None:
         raise ValueError("sweep_energies requires base_cfg.impact to be set")
-    _configure_sweep_warnings()
     rows: List[dict] = []
     n = len(energies_J)
     # Only the impact energy (→ damage) varies here; the mesh-defining inputs
     # are constant, so build_fe_mesh reuses the cached mesh skeleton across
     # iterations and only re-derives the per-element damage factors (#23).
-    for i, E in enumerate(energies_J):
-        new_impact = replace(base_cfg.impact, energy_J=float(E))
-        cfg = replace(base_cfg, impact=new_impact)
-        row = _try_run_one(cfg, on_error, f"energy_J={float(E):g}")
-        row["energy_J"] = float(E)
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedupe_impact_warnings():
+        for i, E in enumerate(energies_J):
+            new_impact = replace(base_cfg.impact, energy_J=float(E))
+            cfg = replace(base_cfg, impact=new_impact)
+            row = _try_run_one(cfg, on_error, f"energy_J={float(E):g}")
+            row["energy_J"] = float(E)
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = _finalize(rows, "energy_J")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -168,16 +196,16 @@ def sweep_layups(
     progress_callback: Optional[_ProgressCallback] = None,
 ) -> pd.DataFrame:
     """Sweep layup sequences."""
-    _configure_sweep_warnings()
     rows: List[dict] = []
     n = len(layups)
-    for i, layup in enumerate(layups):
-        cfg = replace(base_cfg, layup_deg=list(layup))
-        layup_str = "/".join(f"{a:g}" for a in layup)
-        row = _try_run_one(cfg, on_error, f"layup={layup_str}")
-        row["layup"] = layup_str
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedupe_impact_warnings():
+        for i, layup in enumerate(layups):
+            cfg = replace(base_cfg, layup_deg=list(layup))
+            layup_str = "/".join(f"{a:g}" for a in layup)
+            row = _try_run_one(cfg, on_error, f"layup={layup_str}")
+            row["layup"] = layup_str
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = _finalize(rows, "layup")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -192,15 +220,15 @@ def sweep_thicknesses(
     progress_callback: Optional[_ProgressCallback] = None,
 ) -> pd.DataFrame:
     """Sweep ply thickness values."""
-    _configure_sweep_warnings()
     rows: List[dict] = []
     n = len(ply_thicknesses_mm)
-    for i, t in enumerate(ply_thicknesses_mm):
-        cfg = replace(base_cfg, ply_thickness_mm=float(t))
-        row = _try_run_one(cfg, on_error, f"ply_thickness_mm={float(t):g}")
-        row["ply_thickness_mm"] = float(t)
-        rows.append(row)
-        _emit_progress(progress_callback, i + 1, n)
+    with _dedupe_impact_warnings():
+        for i, t in enumerate(ply_thicknesses_mm):
+            cfg = replace(base_cfg, ply_thickness_mm=float(t))
+            row = _try_run_one(cfg, on_error, f"ply_thickness_mm={float(t):g}")
+            row["ply_thickness_mm"] = float(t)
+            rows.append(row)
+            _emit_progress(progress_callback, i + 1, n)
     df = _finalize(rows, "ply_thickness_mm")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
