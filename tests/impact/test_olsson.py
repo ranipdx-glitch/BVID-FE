@@ -1,10 +1,12 @@
 import dataclasses
 import math
 
+import pytest
+
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import MATERIAL_LIBRARY
-from bvidfe.impact.olsson import NAVIER_N, onset_energy, threshold_load
+from bvidfe.impact.olsson import NAVIER_N, _k_bending_ssss, onset_energy, threshold_load
 
 
 def test_threshold_load_scales_with_sqrt_G_IIc():
@@ -47,3 +49,35 @@ def test_onset_energy_scales_with_material_G_IIc():
     E2 = onset_energy(lam2, pan, imp)
     # onset energy ∝ Pc^2 ∝ G_IIc, so 4x => 4x (approximately)
     assert E2 > E1
+
+
+@pytest.mark.parametrize(
+    "x0, y0",
+    [
+        (0.0, 0.0),  # corner (origin)
+        (150.0, 100.0),  # opposite corner (Lx, Ly)
+        (0.0, 50.0),  # mid-left edge (x0 == 0)
+        (75.0, 100.0),  # top edge (y0 == Ly)
+        (-1.0, 50.0),  # outside the panel
+    ],
+)
+def test_k_bending_ssss_boundary_raises_valueerror(x0, y0):
+    """A point load on/outside the SSSS plate boundary is degenerate: the
+    bending compliance is singular, so we raise ValueError rather than
+    crashing with ZeroDivisionError (issue #19)."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    pan = PanelGeometry(150, 100)
+    with pytest.raises(ValueError, match="singular at the boundary"):
+        _k_bending_ssss(lam, pan, x0, y0)
+
+
+def test_k_bending_ssss_interior_returns_finite_positive():
+    """Regression guard: a normal interior location still yields a finite,
+    strictly positive bending stiffness."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    pan = PanelGeometry(150, 100)
+    k = _k_bending_ssss(lam, pan, 75.0, 50.0)
+    assert math.isfinite(k)
+    assert k > 0.0

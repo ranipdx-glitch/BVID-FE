@@ -77,6 +77,11 @@ def _k_bending_ssss(
     _, _, D = lam.abd_matrices()
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
     a, b = pan.Lx_mm, pan.Ly_mm
+    if not (0.0 < x0 < a and 0.0 < y0 < b):
+        raise ValueError(
+            f"impact location ({x0}, {y0}) must lie strictly inside the panel "
+            f"(0, {a}) x (0, {b}); SSSS bending compliance is singular at the boundary."
+        )
     w_over_P = 0.0
     for m in range(1, n_modes + 1):
         for n in range(1, n_modes + 1):
