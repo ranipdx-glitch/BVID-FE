@@ -156,7 +156,9 @@ class FeMeshSkeleton:
     centroid_y: np.ndarray  # (n_elements,) element centroid y
     cz_bot: np.ndarray  # (n_elements,) element bottom z
     cz_top: np.ndarray  # (n_elements,) element top z
-    ply_thickness_mm: float
+    ply_thickness_mm: float  # uniform ply thickness (meaningful iff is_uniform)
+    is_uniform: bool  # True when every ply has the same thickness
+    ply_top_z: np.ndarray  # (n_plies + 1,) cumulative ply-boundary z from 0
 
 
 def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
@@ -169,19 +171,44 @@ def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
     """
     panel = config.panel
     layup = config.layup_deg
-    h = config.ply_thickness_mm
     n_plies = len(layup)
     mesh = config.mesh if config.mesh is not None else MeshParams()
 
-    Lx, Ly, Lz = panel.Lx_mm, panel.Ly_mm, n_plies * h
-    nx = max(1, math.ceil(Lx / mesh.in_plane_size_mm))
-    ny = max(1, math.ceil(Ly / mesh.in_plane_size_mm))
-    nz = n_plies * mesh.elements_per_ply
+    # Resolve per-ply thicknesses (scalar or sequence).
+    raw_t = config.ply_thickness_mm
+    if isinstance(raw_t, (list, tuple, np.ndarray)):
+        ply_thicknesses = [float(t) for t in raw_t]
+    else:
+        ply_thicknesses = [float(raw_t)] * n_plies
+    is_uniform = all(t == ply_thicknesses[0] for t in ply_thicknesses)
+    h = ply_thicknesses[0]
+    # Cumulative ply-boundary z from the bottom face (n_plies + 1 entries).
+    ply_top_z = np.empty(n_plies + 1, dtype=float)
+    ply_top_z[0] = 0.0
+    for k, t in enumerate(ply_thicknesses):
+        ply_top_z[k + 1] = ply_top_z[k] + t
 
-    # Nodes on a regular grid (k outer, j, i inner — matches _node_id)
+    nx = max(1, math.ceil(panel.Lx_mm / mesh.in_plane_size_mm))
+    ny = max(1, math.ceil(panel.Ly_mm / mesh.in_plane_size_mm))
+    nz = n_plies * mesh.elements_per_ply
+    Lx, Ly = panel.Lx_mm, panel.Ly_mm
+
+    # Nodes on a regular grid (k outer, j, i inner — matches _node_id).
     x_nodes = np.linspace(0.0, Lx, nx + 1)
     y_nodes = np.linspace(0.0, Ly, ny + 1)
-    z_nodes = np.linspace(0.0, Lz, nz + 1)
+    if is_uniform:
+        # Bit-identical to the legacy uniform path.
+        z_nodes = np.linspace(0.0, n_plies * h, nz + 1)
+    else:
+        # Subdivide each ply into elements_per_ply equal slices so ply
+        # boundaries land exactly on element faces.
+        zs: list[float] = [0.0]
+        for ply_i in range(n_plies):
+            z_b = ply_top_z[ply_i]
+            z_t = ply_top_z[ply_i + 1]
+            for s in range(1, mesh.elements_per_ply + 1):
+                zs.append(z_b + (z_t - z_b) * (s / mesh.elements_per_ply))
+        z_nodes = np.asarray(zs, dtype=float)
     node_coords = np.array(
         [[x, y, z] for z in z_nodes for y in y_nodes for x in x_nodes],
         dtype=float,
@@ -242,6 +269,8 @@ def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
         cz_bot=cz_bot,
         cz_top=cz_top,
         ply_thickness_mm=h,
+        is_uniform=is_uniform,
+        ply_top_z=ply_top_z,
     )
 
 
@@ -271,7 +300,12 @@ def apply_damage(skeleton: FeMeshSkeleton, damage: DamageState) -> FeMesh:
     # vectorised "any match" result identical.
     oop_hit = np.zeros(n_elem, dtype=bool)
     for ell in damage.delaminations:
-        z_iface = (ell.interface_index + 1) * h
+        # Uniform path keeps the exact legacy expression (bit-identical);
+        # non-uniform uses the cumulative per-ply boundary.
+        if skeleton.is_uniform:
+            z_iface = (ell.interface_index + 1) * h
+        else:
+            z_iface = float(skeleton.ply_top_z[ell.interface_index + 1])
         straddles = (cz_bot <= z_iface) & (z_iface <= cz_top)
         if not straddles.any():
             continue
@@ -310,11 +344,16 @@ def _skeleton_signature(config: AnalysisConfig) -> tuple:
     the damage state changes between iterations).
     """
     mesh = config.mesh if config.mesh is not None else MeshParams()
+    raw_t = config.ply_thickness_mm
+    if isinstance(raw_t, (list, tuple, np.ndarray)):
+        t_sig: tuple = tuple(float(t) for t in raw_t)
+    else:
+        t_sig = (float(raw_t),)
     return (
         float(config.panel.Lx_mm),
         float(config.panel.Ly_mm),
         tuple(float(a) for a in config.layup_deg),
-        float(config.ply_thickness_mm),
+        t_sig,
         int(mesh.elements_per_ply),
         float(mesh.in_plane_size_mm),
     )

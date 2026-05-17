@@ -6,6 +6,23 @@ All notable changes to BVID-FE are documented in this file.
 
 In-progress work toward v0.2.0. No tag yet.
 
+### Added
+
+- **Per-ply thickness support (issue #5).** ``Laminate.ply_thickness_mm``,
+  ``AnalysisConfig.ply_thickness_mm`` and the CLI ``--thickness`` flag now
+  accept either a single positive number (uniform laminate, the legacy
+  behaviour) **or** a sequence of per-ply thicknesses with one entry per
+  ply in the layup. This models laminates that mix plies of different
+  fabric weights or prepreg gauges. ``Laminate`` exposes the resolved
+  per-ply list via ``ply_thicknesses_mm`` and reports
+  ``is_uniform_thickness``; the CLT ABD assembly, ``_pristine_strength``
+  thickness-weighted average, the semi-analytical sublaminate selection /
+  buckling load, and the fe3d hex-mesh z-grid all consume the per-ply list
+  directly. A uniform list reproduces scalar results bit-for-bit across
+  all three tiers (``tests/test_per_ply_thickness.py``); ``--thickness``
+  accepts the same comma-separated form as ``--layup`` with a
+  length-match check. Closes #5.
+
 ### Changed
 
 - **README + ARCHITECTURE refreshed to match v0.2.0-dev reality.** The

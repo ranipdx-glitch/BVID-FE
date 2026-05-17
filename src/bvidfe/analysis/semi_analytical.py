@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Optional
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
@@ -61,9 +61,13 @@ class DegenerateThinSublaminateWarning(UserWarning):
 def _sublaminate_D_matrix(
     material: OrthotropicMaterial,
     sub_layup_deg: list[float],
-    ply_thickness_mm: float,
+    ply_thickness_mm: Union[float, Sequence[float]],
 ) -> np.ndarray:
-    """CLT D matrix (3, 3) for a sublaminate. z origin at sublaminate midplane."""
+    """CLT D matrix (3, 3) for a sublaminate. z origin at sublaminate midplane.
+
+    ``ply_thickness_mm`` may be a scalar (uniform) or a per-ply sequence of
+    the same length as ``sub_layup_deg``.
+    """
     sub_lam = Laminate(material, sub_layup_deg, ply_thickness_mm)
     _, _, D = sub_lam.abd_matrices()
     return D
@@ -137,7 +141,13 @@ def sublaminate_buckling_load(
     if len(sub_layup) == 0:
         return float("inf")
 
-    D = _sublaminate_D_matrix(lam.material, sub_layup, lam.ply_thickness_mm)
+    # Slice the per-ply thicknesses for whichever half is the sublaminate so
+    # the D matrix uses the actual ply gauges (not n_plies * uniform_t).
+    full_t = lam.ply_thicknesses_mm
+    upper_t = full_t[: i + 1]
+    lower_t = full_t[i + 1 :]
+    sub_t = upper_t if len(upper_layup) <= len(lower_layup) else lower_t
+    D = _sublaminate_D_matrix(lam.material, sub_layup, sub_t)
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
 
     # Rectangle dimensions (panel frame). Ellipse semi-axes = a, b.
@@ -188,8 +198,13 @@ def find_critical_interface(damage: DamageState, lam: Laminate) -> Optional[int]
     """
     if not damage.delaminations:
         return None
-    n_plies = len(lam.layup_deg)
-    h = lam.ply_thickness_mm
+    # Cumulative through-thickness position of each interface from the bottom
+    # face (per-ply, so non-uniform stacks score interfaces correctly).
+    thicknesses = lam.ply_thicknesses_mm
+    total_h = float(sum(thicknesses))
+    cum_z = [0.0] * (len(thicknesses) + 1)
+    for k, t in enumerate(thicknesses):
+        cum_z[k + 1] = cum_z[k] + t
     per_iface_max_area: dict[int, float] = {}
     for e in damage.delaminations:
         per_iface_max_area[e.interface_index] = max(
@@ -199,8 +214,9 @@ def find_critical_interface(damage: DamageState, lam: Laminate) -> Optional[int]
     best_idx: Optional[int] = None
     best_score = -1.0
     for idx, area in per_iface_max_area.items():
-        z_upper = (idx + 1) * h  # distance from top of laminate (plies 0..idx above)
-        z_lower = (n_plies - idx - 1) * h
+        # Distance from each laminate surface to interface ``idx``.
+        z_upper = cum_z[idx + 1]
+        z_lower = total_h - cum_z[idx + 1]
         score = area * max(z_upper, z_lower)
         if score > best_score:
             best_score = score
@@ -248,11 +264,15 @@ def semi_analytical_cai(
     critical_ellipse = max(ellipses_at_crit, key=lambda e: e.area_mm2)
     N_cr_per_mm = sublaminate_buckling_load(lam, critical_ellipse, boundary=boundary)  # N/mm
 
-    # Sublaminate thickness
-    sub_n_plies = min(crit_idx + 1, len(lam.layup_deg) - crit_idx - 1)
-    if sub_n_plies <= 0:
+    # Sublaminate thickness — sum the actual per-ply thicknesses of whichever
+    # half ("above" or "below" the interface) is the buckling sublaminate.
+    thicknesses = lam.ply_thicknesses_mm
+    upper_t = thicknesses[: crit_idx + 1]
+    lower_t = thicknesses[crit_idx + 1 :]
+    sub_t = upper_t if len(upper_t) <= len(lower_t) else lower_t
+    if len(sub_t) == 0:
         return sigma_soutis, crit_idx, None
-    h_sub = sub_n_plies * lam.ply_thickness_mm
+    h_sub = float(sum(sub_t))
     sigma_buckling = N_cr_per_mm / h_sub if h_sub > 0 else float("inf")
 
     sigma_cai = min(sigma_soutis, sigma_buckling)
