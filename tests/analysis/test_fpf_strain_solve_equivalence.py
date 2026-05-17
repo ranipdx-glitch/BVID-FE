@@ -21,6 +21,8 @@ second.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -106,3 +108,34 @@ def test_vectorised_tension_path_also_matches_scalar_reference():
     )
     assert np.isfinite(eps_vec) and np.isfinite(eps_ref)
     assert eps_vec == pytest.approx(eps_ref, rel=1e-10, abs=1e-12)
+
+
+def test_panel_boundary_changes_fpf_strain():
+    """Issue #32: the FPF/TAI BC builder must honour ``panel.boundary``.
+
+    Previously uniaxial_x_bcs ignored it, so the fe3d FPF/TAI residual was
+    identical for clamped/simply_supported/free (silent no-op). Now the same
+    u_z edge restraint the buckling path uses is applied, so the three
+    boundary conditions must give measurably different — and physically
+    ordered — failure strains: more out-of-plane edge restraint (clamped)
+    is stiffer and fails sooner than the unrestrained (free) case.
+    """
+    damage = DamageState(delaminations=[], dent_depth_mm=0.0)
+    cfg, mesh, elements = _build_setup(damage)
+
+    def eps_for(boundary: str) -> float:
+        panel = dataclasses.replace(cfg.panel, boundary=boundary)
+        cfg_b = dataclasses.replace(cfg, panel=panel)
+        return _solve_failure_strain_analytic(
+            cfg_b, mesh, elements, strain_sign=-1, criterion="larc05"
+        )
+
+    eps_ss = eps_for("simply_supported")
+    eps_cl = eps_for("clamped")
+    eps_fr = eps_for("free")
+
+    assert eps_cl != eps_ss
+    assert eps_fr != eps_ss
+    # Monotone: clamped (most u_z edge restraint) < simply_supported
+    #           < free (no extra restraint).
+    assert eps_cl < eps_ss < eps_fr, (eps_cl, eps_ss, eps_fr)

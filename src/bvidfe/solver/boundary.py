@@ -2,8 +2,9 @@
 
 Standard patterns:
 - uniaxial_x_bcs: clamp x_min, prescribe u_x at x_max (+ symmetry on y_min,
-  z_min). The sign of ``applied_strain`` selects compression (negative) or
-  tension (positive) — the BC topology is identical either way.
+  z_min) plus a ``boundary``-dependent u_z edge restraint. The sign of
+  ``applied_strain`` selects compression (negative) or tension (positive)
+  — the in-plane BC topology is identical either way.
 - apply_dirichlet_penalty: multiply K[i,i] by penalty and F[i] = penalty * value.
 """
 
@@ -62,7 +63,11 @@ def _nodes_on_plane(
     return np.where(np.abs(node_coords[:, axis] - coord) < tol)[0]
 
 
-def uniaxial_x_bcs(node_coords: np.ndarray, applied_strain: float) -> List[BoundaryCondition]:
+def uniaxial_x_bcs(
+    node_coords: np.ndarray,
+    applied_strain: float,
+    boundary: str = "simply_supported",
+) -> List[BoundaryCondition]:
     """Build BCs for a uniaxial test along x (compression or tension).
 
     The sign of ``applied_strain`` is the only difference between the
@@ -74,6 +79,17 @@ def uniaxial_x_bcs(node_coords: np.ndarray, applied_strain: float) -> List[Bound
       positive = tension)
     - y_min nodes: u_y = 0 (symmetry)
     - z_min nodes: u_z = 0 (symmetry)
+
+    ``boundary`` adds the same panel-edge out-of-plane (u_z) restraint the
+    fe3d buckling path applies, so the GUI boundary selector has a visible
+    effect on the FPF/TAI residual (#32):
+
+    - ``"simply_supported"`` : pin u_z on the two loaded edges (x_min, x_max)
+    - ``"clamped"``          : pin u_z on all four lateral edges
+    - ``"free"``             : no extra edge restraint
+
+    An unrecognised value is treated as ``"simply_supported"`` (matching the
+    fe3d buckling path's fallback).
     """
     Lx = node_coords[:, 0].max() - node_coords[:, 0].min()
     xmin_nodes = _nodes_on_plane(node_coords, 0, node_coords[:, 0].min())
@@ -90,4 +106,15 @@ def uniaxial_x_bcs(node_coords: np.ndarray, applied_strain: float) -> List[Bound
         bcs.append(BoundaryCondition(dof=3 * int(n) + 1, value=0.0))
     for n in zmin_nodes:
         bcs.append(BoundaryCondition(dof=3 * int(n) + 2, value=0.0))
+
+    if boundary != "free":
+        edge_nodes: set[int] = set()
+        edge_nodes.update(int(n) for n in xmin_nodes)
+        edge_nodes.update(int(n) for n in xmax_nodes)
+        if boundary == "clamped":
+            ymax_nodes = _nodes_on_plane(node_coords, 1, node_coords[:, 1].max())
+            edge_nodes.update(int(n) for n in ymin_nodes)
+            edge_nodes.update(int(n) for n in ymax_nodes)
+        for n in sorted(edge_nodes):
+            bcs.append(BoundaryCondition(dof=3 * n + 2, value=0.0))
     return bcs

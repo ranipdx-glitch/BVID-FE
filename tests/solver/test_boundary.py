@@ -59,3 +59,28 @@ def test_uniaxial_x_bcs_tension_positive_displacement():
     bcs = uniaxial_x_bcs(node_coords, applied_strain=0.005)
     xmax = [b for b in bcs if abs(b.value - (0.005 * 2)) < 1e-6]
     assert len(xmax) == 4
+
+
+def _uz_constrained_nodes(bcs):
+    """Set of node indices with a u_z=0 constraint (dof % 3 == 2, value 0)."""
+    return {b.dof // 3 for b in bcs if b.dof % 3 == 2 and b.value == 0.0}
+
+
+def test_uniaxial_x_bcs_boundary_adds_nested_uz_edge_restraints():
+    """Issue #32: panel.boundary adds the same u_z edge restraint the fe3d
+    buckling path uses. On a 3x3x3 grid the constrained-u_z node sets must
+    nest strictly free ⊂ simply_supported ⊂ clamped (free = z_min symmetry
+    only; simply_supported adds the two loaded x-edges; clamped adds the
+    y-edges too)."""
+    coords = np.array(
+        [[x, y, z] for x in (0.0, 1.0, 2.0) for y in (0.0, 1.0, 2.0) for z in (0.0, 1.0, 2.0)],
+        dtype=float,
+    )
+    free = _uz_constrained_nodes(uniaxial_x_bcs(coords, -0.01, boundary="free"))
+    ss = _uz_constrained_nodes(uniaxial_x_bcs(coords, -0.01, boundary="simply_supported"))
+    clamped = _uz_constrained_nodes(uniaxial_x_bcs(coords, -0.01, boundary="clamped"))
+    assert free < ss < clamped  # strict subset chain
+    # free is exactly the z_min symmetry face (9 of the 27 nodes).
+    assert free == {i for i, c in enumerate(coords) if c[2] == 0.0}
+    # An unrecognised value falls back to simply_supported (mirrors buckling).
+    assert _uz_constrained_nodes(uniaxial_x_bcs(coords, -0.01, boundary="bogus")) == ss

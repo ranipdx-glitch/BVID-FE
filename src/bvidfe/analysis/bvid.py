@@ -122,23 +122,9 @@ class BvidAnalysis:
                     warnings_tags.append("fe3d_buckling_artefact_dropped")
                 sigma = min(sigma_buckling, sigma_fpf) if buckling_plausible else sigma_fpf
                 buckling_eigs = [lambda_crit] if lambda_crit > 0 else None
-                fpf_governs = not buckling_plausible
             else:
                 sigma = fe3d_tai(self.config, damage, lam, sigma_0)
                 buckling_eigs = None
-                fpf_governs = True
-            # The FPF / TAI BC builder (uniaxial_x_bcs) does not yet honour
-            # cfg.panel.boundary — only the buckling path
-            # does. When the reported residual comes from FPF/TAI and a
-            # non-default boundary was requested, surface that it had no
-            # effect rather than letting it look silently applied (#32).
-            if fpf_governs and self.config.panel.boundary != "simply_supported":
-                notes.append(
-                    f"fe3d FPF/TAI: panel.boundary="
-                    f"{self.config.panel.boundary!r} is not yet applied to "
-                    f"the FPF/TAI BC set; the residual is unaffected by it."
-                )
-                warnings_tags.append("fe3d_boundary_not_applied_to_fpf_tai")
             critical_interface = None
             field_results = None
         else:

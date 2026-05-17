@@ -111,9 +111,6 @@ class AnalysisResults:
     #: - ``"fe3d_buckling_artefact_dropped"`` — buckling solved but the
     #:   result was below 5% of pristine and was discarded as a numerical
     #:   artefact; residual is from first-ply failure.
-    #: - ``"fe3d_boundary_not_applied_to_fpf_tai"`` — a non-default
-    #:   ``panel.boundary`` was requested but the FPF/TAI BC set does not
-    #:   yet honour it (only the buckling path does).
     #:
     #: The ``impactor_mass_ratio_below_unity`` / ``dpa_panel_area_cap_clipped``
     #: regimes currently surface only via Python ``UserWarning`` + ``notes``;

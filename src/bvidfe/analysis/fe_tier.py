@@ -245,7 +245,7 @@ def _solve_failure_strain_analytic(
     material = _resolve_material(cfg)
 
     # One FE solve at reference strain = strain_sign * strain_cap
-    bcs = uniaxial_x_bcs(mesh.node_coords, strain_sign * strain_cap)
+    bcs = uniaxial_x_bcs(mesh.node_coords, strain_sign * strain_cap, boundary=cfg.panel.boundary)
     u_ref = solve_linear_static(elements, mesh.element_dof_maps, mesh.n_dof, bcs)
 
     c_crit_min = np.inf
@@ -318,7 +318,7 @@ def _solve_failure_strain_analytic_scalar_ref(
     """
     material = _resolve_material(cfg)
 
-    bcs = uniaxial_x_bcs(mesh.node_coords, strain_sign * strain_cap)
+    bcs = uniaxial_x_bcs(mesh.node_coords, strain_sign * strain_cap, boundary=cfg.panel.boundary)
     u_ref = solve_linear_static(elements, mesh.element_dof_maps, mesh.n_dof, bcs)
 
     c_crit_min = np.inf
