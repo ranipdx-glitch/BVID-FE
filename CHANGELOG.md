@@ -14,8 +14,10 @@ In-progress work toward v0.2.0. No tag yet.
   validated datasets in v0.1.0" — three statements that were correct
   for v0.1.0 but stale for v0.2.0-dev (where the GUI ships, the
   buckling eigensolve is implemented, and the validation harness is in
-  the repo). The test-count badge advertised 216 passing; the actual
-  count is 309. ``ARCHITECTURE.md``'s module catalog had no entry for
+  the repo). The hard-coded test-count badge ("216 passing", stale the
+  moment the suite grew) was replaced with a CI-driven GitHub Actions
+  workflow status shield that updates automatically.
+  ``ARCHITECTURE.md``'s module catalog had no entry for
   the ``gui/`` package, the dependency diagram did not reach ``cli``
   or ``gui``, and the v0.2.0 roadmap section was a list of items that
   have since shipped. All three pages updated to reflect the current
