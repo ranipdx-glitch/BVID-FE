@@ -66,6 +66,13 @@ is Lx = 150 mm, Ly = 100 mm). `--thickness` is the per-ply thickness in
 mm, `--layup` is a comma-separated list of ply angles in degrees, and
 `--energy` is the impact energy in joules.
 
+`--thickness` (and the `ply_thickness_mm` argument of `AnalysisConfig` /
+`Laminate`) also accepts a comma-separated list / sequence of per-ply
+thicknesses with one entry per ply in `--layup`, for laminates that mix
+plies of different fabric weights or prepreg gauges, e.g.
+`--thickness 0.10,0.10,0.20,0.20,0.20,0.20,0.10,0.10`. A single value
+keeps the uniform-laminate behaviour.
+
 ### Python API — impact-driven path
 
 ```python
