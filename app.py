@@ -19,6 +19,7 @@ import math
 import sys
 import warnings
 from dataclasses import replace
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -83,6 +84,33 @@ IMPACTOR_SHAPES: list[str] = ["hemispherical", "flat", "conical"]
 MAX_PLIES = 400
 MAX_SWEEP_POINTS = 25
 DPA_SATURATION_PCT = 79.0
+
+# MRB / NCR disposition support -------------------------------------------
+# "Barely visible" impact damage is conventionally bounded by a residual
+# surface-dent detectability threshold; 0.30 mm (~0.012 in) is a common
+# design damage-tolerance value. Each program MUST override this with its
+# own damage-tolerance substantiation — it is exposed as a UI input.
+BVID_DENT_THRESHOLD_MM = 0.30
+
+NC_TYPES: list[str] = [
+    "Impact damage (BVID/VID)",
+    "Delamination / disbond",
+    "Porosity / voids",
+    "Foreign object / inclusion",
+    "Resin-rich / resin-starved",
+    "Wrinkle / fiber waviness",
+    "Out-of-tolerance geometry",
+    "Other",
+]
+
+FOUND_DURING: list[str] = [
+    "In-process inspection",
+    "Final inspection",
+    "Assembly / installation",
+    "In-service / field inspection",
+    "Receiving inspection",
+    "Other",
+]
 
 _DF_FORMATS = {
     "energy_J": "{:g}",
@@ -260,6 +288,246 @@ def _config_from_dict(d: dict) -> AnalysisConfig:
         damage=damage,
         mesh=mesh,
     )
+
+
+# ---------------------------------------------------------------------------
+# NCR (Nonconformance Report) export — MRB disposition support
+# ---------------------------------------------------------------------------
+
+
+def _recommend_disposition(result_dict: dict, dent_threshold_mm: float) -> dict:
+    """Heuristic MRB disposition *recommendation* from BVID-FE outputs.
+
+    This is structured decision support only: it bands the predicted
+    strength retention, raises the governing flags, and cites the criteria
+    a board must check. It does NOT issue an approved disposition — a
+    qualified Material Review Board must review, modify, and sign.
+    """
+    kd = float(result_dict["knockdown"])
+    dent = float(result_dict["damage"]["dent_depth_mm"])
+    fbr = float(result_dict["damage"]["fiber_break_radius_mm"])
+    n_delam = len(result_dict["damage"]["delaminations"])
+    dpa = float(result_dict["dpa_mm2"])
+
+    flags: list[str] = []
+    if dent >= dent_threshold_mm:
+        flags.append(
+            f"Residual dent {dent:.3f} mm ≥ detectability threshold "
+            f"{dent_threshold_mm:.3f} mm — damage is visible (VID, not "
+            "BVID); disposition under the visible-damage damage-tolerance "
+            "branch."
+        )
+    if fbr > 0.0:
+        flags.append(
+            f"Fiber breakage present (r ≈ {fbr:.2f} mm) — primary load "
+            "path severed; Use-As-Is is not appropriate without structural "
+            "substantiation."
+        )
+    if n_delam > 0:
+        flags.append(
+            f"{n_delam} delamination(s) modelled — assess sublaminate "
+            "stability and growth under spectrum/limit load."
+        )
+
+    if fbr > 0.0:
+        path = "Repair"
+        band = "fiber breakage present"
+    elif kd >= 0.97 and dent < dent_threshold_mm and n_delam == 0:
+        path = "Use-As-Is (UAI)"
+        band = f"knockdown {kd:.3f} ≥ 0.97, no delamination, sub-threshold dent"
+    elif kd >= 0.85:
+        path = "Use-As-Is (UAI) with engineering substantiation, or Repair"
+        band = f"0.85 ≤ knockdown {kd:.3f} < 0.97"
+    elif kd >= 0.70:
+        path = "Repair"
+        band = f"0.70 ≤ knockdown {kd:.3f} < 0.85"
+    else:
+        path = "Repair (structural) or Scrap"
+        band = f"knockdown {kd:.3f} < 0.70"
+
+    rationale = (
+        f"Predicted residual strength retains {kd * 100:.1f}% of pristine "
+        f"({result_dict['residual_strength_MPa']:.1f} MPa vs "
+        f"{result_dict['pristine_strength_MPa']:.1f} MPa) at projected "
+        f"damage area {dpa:.0f} mm² (analysis tier: "
+        f"{result_dict['tier_used']}). Banding: {band}. The board must "
+        "confirm a positive Margin of Safety against design ULTIMATE load "
+        "(and LIMIT load with no detrimental deformation) for the as-found "
+        "damage, including no-growth / arrested-growth substantiation over "
+        "the service inspection interval."
+    )
+
+    criteria = [
+        "Margin of Safety ≥ 0 vs design ultimate load for the as-found "
+        "damage state (governing design load case).",
+        "Damage-tolerance / no-growth substantiation per CMH-17 Vol. 3 "
+        "guidance and the program structural substantiation document.",
+        "BVID detectability basis (residual dent depth + NDI/tap-test) "
+        f"against the {dent_threshold_mm:.3f} mm design threshold.",
+        "Approved Structural Repair Manual (SRM) limits if a Repair path "
+        "is selected; engineering disposition required if outside SRM.",
+        "Control of nonconforming output per AS9100 §8.7 and the site MRB " "procedure.",
+    ]
+
+    return {
+        "recommended_path": path,
+        "rationale": rationale,
+        "criteria": criteria,
+        "flags": flags,
+        "knockdown": kd,
+        "status": "PROPOSED — REQUIRES MRB REVIEW AND APPROVAL",
+    }
+
+
+def _build_ncr(form: dict, cfg, result_dict: dict | None, rec: dict | None) -> tuple[str, dict]:
+    """Assemble a structured NCR as (Markdown document, machine-readable dict)."""
+    layup_str = "[" + "/".join(f"{a:g}" for a in cfg.layup_deg) + "]"
+
+    analysis: dict | None = None
+    if result_dict is not None:
+        analysis = {
+            "tool": "BVID-FE",
+            "tier_used": result_dict["tier_used"],
+            "pristine_strength_MPa": result_dict["pristine_strength_MPa"],
+            "residual_strength_MPa": result_dict["residual_strength_MPa"],
+            "knockdown": result_dict["knockdown"],
+            "projected_damage_area_mm2": result_dict["dpa_mm2"],
+            "dent_depth_mm": result_dict["damage"]["dent_depth_mm"],
+            "fiber_break_radius_mm": result_dict["damage"]["fiber_break_radius_mm"],
+            "n_delaminations": len(result_dict["damage"]["delaminations"]),
+            "notes": list(result_dict.get("notes", [])),
+            "warnings": list(result_dict.get("warnings", [])),
+        }
+
+    ncr = {
+        "ncr_number": form["ncr_number"],
+        "revision": form["revision"],
+        "originated_by": form["originator"],
+        "date": form["date"],
+        "program": form["program"],
+        "part_number": form["part_number"],
+        "part_name": form["part_name"],
+        "serial_or_lot": form["serial_lot"],
+        "work_order": form["work_order"],
+        "quantity_affected": form["quantity"],
+        "found_at_station": form["station"],
+        "found_during": form["found_during"],
+        "nonconformance_type": form["nc_type"],
+        "nonconformance_description": form["description"],
+        "as_found_dimensions": form["dimensions"],
+        "material_configuration": {
+            "material": cfg.material,
+            "layup_deg": list(cfg.layup_deg),
+            "layup_string": layup_str,
+            "ply_thickness_mm": cfg.ply_thickness_mm,
+            "panel_Lx_mm": cfg.panel.Lx_mm,
+            "panel_Ly_mm": cfg.panel.Ly_mm,
+            "panel_boundary": cfg.panel.boundary,
+        },
+        "engineering_analysis": analysis,
+        "proposed_disposition": rec,
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    lines: list[str] = []
+    lines.append(f"# Nonconformance Report — {form['ncr_number']}")
+    lines.append("")
+    lines.append(
+        "> **Decision-support document.** The disposition below is a "
+        "structured *recommendation* generated from BVID-FE analysis. It "
+        "is NOT an approved disposition. A qualified Material Review Board "
+        "must review, modify as required, and approve."
+    )
+    lines.append("")
+    lines.append("## 1. Identification")
+    lines.append("")
+    lines.append(f"- **NCR number:** {form['ncr_number']}  (rev {form['revision']})")
+    lines.append(f"- **Originated by:** {form['originator']}")
+    lines.append(f"- **Date:** {form['date']}")
+    lines.append(f"- **Program / project:** {form['program']}")
+    lines.append(f"- **Part number:** {form['part_number']}")
+    lines.append(f"- **Part name:** {form['part_name']}")
+    lines.append(f"- **Serial / lot:** {form['serial_lot']}")
+    lines.append(f"- **Work order:** {form['work_order']}")
+    lines.append(f"- **Quantity affected:** {form['quantity']}")
+    lines.append(f"- **Found at / station:** {form['station']}")
+    lines.append(f"- **Found during:** {form['found_during']}")
+    lines.append("")
+    lines.append("## 2. Nonconformance")
+    lines.append("")
+    lines.append(f"- **Type:** {form['nc_type']}")
+    lines.append(f"- **As-found dimensions:** {form['dimensions']}")
+    lines.append("")
+    lines.append(form["description"] or "_No description provided._")
+    lines.append("")
+    lines.append("## 3. Material / configuration")
+    lines.append("")
+    lines.append(f"- **Material:** {cfg.material}")
+    lines.append(f"- **Layup:** {layup_str} ({len(cfg.layup_deg)} plies)")
+    lines.append(f"- **Ply thickness:** {cfg.ply_thickness_mm:g} mm")
+    lines.append(
+        f"- **Panel:** {cfg.panel.Lx_mm:g} × {cfg.panel.Ly_mm:g} mm, " f"{cfg.panel.boundary}"
+    )
+    lines.append("")
+    lines.append("## 4. Engineering analysis (BVID-FE)")
+    lines.append("")
+    if analysis is None:
+        lines.append(
+            "_Engineering analysis pending — run a BVID-FE analysis and "
+            "regenerate this NCR to attach residual-strength results._"
+        )
+    else:
+        lines.append(f"- **Analysis tier:** {analysis['tier_used']}")
+        lines.append(f"- **Pristine strength:** {analysis['pristine_strength_MPa']:.1f} MPa")
+        lines.append(f"- **Residual strength:** {analysis['residual_strength_MPa']:.1f} MPa")
+        lines.append(f"- **Knockdown:** {analysis['knockdown']:.3f}")
+        lines.append(
+            f"- **Projected damage area:** " f"{analysis['projected_damage_area_mm2']:.0f} mm²"
+        )
+        lines.append(f"- **Dent depth:** {analysis['dent_depth_mm']:.3f} mm")
+        lines.append(f"- **Fiber-break radius:** {analysis['fiber_break_radius_mm']:.2f} mm")
+        lines.append(f"- **Delaminations modelled:** {analysis['n_delaminations']}")
+        if analysis["notes"]:
+            lines.append("- **Runtime notes:**")
+            for n in analysis["notes"]:
+                lines.append(f"  - {n}")
+        if analysis["warnings"]:
+            lines.append("- **Warnings:**")
+            for w in analysis["warnings"]:
+                lines.append(f"  - {w}")
+    lines.append("")
+    lines.append("## 5. Proposed disposition (requires MRB review)")
+    lines.append("")
+    if rec is None:
+        lines.append("_No disposition recommendation — attach a BVID-FE analysis " "first._")
+    else:
+        lines.append(f"- **Status:** {rec['status']}")
+        lines.append(f"- **Recommended path:** {rec['recommended_path']}")
+        lines.append("")
+        lines.append(f"**Rationale.** {rec['rationale']}")
+        lines.append("")
+        if rec["flags"]:
+            lines.append("**Flags raised:**")
+            for fl in rec["flags"]:
+                lines.append(f"- {fl}")
+            lines.append("")
+        lines.append("**Criteria the board must verify:**")
+        for c in rec["criteria"]:
+            lines.append(f"- {c}")
+        lines.append("")
+    lines.append("## 6. MRB review & approval")
+    lines.append("")
+    lines.append("| Role | Name | Disposition concurrence | Signature | Date |")
+    lines.append("|------|------|-------------------------|-----------|------|")
+    lines.append("| Engineering (stress) |  |  |  |  |")
+    lines.append("| Quality |  |  |  |  |")
+    lines.append("| Materials & Processes |  |  |  |  |")
+    lines.append("| MRB chair |  |  |  |  |")
+    lines.append("")
+    lines.append(f"_Generated {ncr['generated_utc']} UTC by BVID-FE._")
+    lines.append("")
+
+    return "\n".join(lines), ncr
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +891,7 @@ tabs = st.tabs(
         "Buckling",
         "Damage Severity",
         "Sweep",
+        "Export NCR",
     ]
 )
 
@@ -890,3 +1159,152 @@ with tabs[6]:
                             file_name=f"bvidfe_sweep_{sweep_tier}.csv",
                             mime="text/csv",
                         )
+
+
+# --- Export NCR tab -------------------------------------------------------
+
+with tabs[7]:
+    st.subheader("Create Nonconformance Report (NCR)")
+    st.caption(
+        "For an engineer in the field: log the nonconformance, attach the "
+        "BVID-FE residual-strength analysis, and export a structured NCR "
+        "with a **proposed** MRB disposition. The recommendation is "
+        "decision support only — a qualified Material Review Board must "
+        "review, modify, and approve it."
+    )
+
+    # The NCR needs a material/layup/panel configuration. Prefer the last
+    # analysed config so results attach; fall back to the live sidebar
+    # config so the NC can be logged before analysis.
+    ncr_payload = st.session_state.get("last_result")
+    if ncr_payload is not None:
+        ncr_cfg = ncr_payload["config"]
+        ncr_result = ncr_payload["result_dict"]
+    elif config_dict is not None:
+        ncr_cfg = _config_from_dict(config_dict)
+        ncr_result = None
+    else:
+        ncr_cfg = None
+        ncr_result = None
+
+    if ncr_cfg is None:
+        st.info(
+            "Complete the sidebar configuration (material, layup, panel) " "before creating an NCR."
+        )
+    else:
+        if ncr_result is None:
+            st.warning(
+                "No BVID-FE analysis attached — the NCR will record the "
+                "nonconformance with engineering analysis marked pending. "
+                "Run an analysis to attach residual strength and a "
+                "disposition recommendation."
+            )
+
+        today = date.today()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ncr_number = st.text_input(
+                "NCR number",
+                value=f"NCR-{today:%Y%m%d}-001",
+                key="ncr_number",
+            )
+            revision = st.text_input("Revision", value="-", key="ncr_rev")
+            originator = st.text_input("Originated by (engineer)", value="", key="ncr_originator")
+            ncr_date = st.date_input("Date", value=today, key="ncr_date")
+        with c2:
+            program = st.text_input("Program / project", value="", key="ncr_program")
+            part_number = st.text_input("Part number", value="", key="ncr_pn")
+            part_name = st.text_input("Part name", value="", key="ncr_part_name")
+            serial_lot = st.text_input("Serial / lot", value="", key="ncr_serial")
+        with c3:
+            work_order = st.text_input("Work order", value="", key="ncr_wo")
+            quantity = st.text_input("Quantity affected", value="1", key="ncr_qty")
+            station = st.text_input("Found at / station", value="", key="ncr_station")
+            found_during = st.selectbox(
+                "Found during", FOUND_DURING, index=3, key="ncr_found_during"
+            )
+
+        nc_type = st.selectbox("Nonconformance type", NC_TYPES, index=0, key="ncr_nc_type")
+        dimensions = st.text_input(
+            "As-found dimensions / location",
+            value="",
+            placeholder="e.g. 25 mm dia. dent, 0.4 mm deep, 120 mm from edge",
+            key="ncr_dims",
+        )
+        description = st.text_area(
+            "Nonconformance description",
+            value="",
+            height=120,
+            placeholder=(
+                "Describe what was found, how, and any inspection (visual, "
+                "tap-test, ultrasonic C-scan) performed."
+            ),
+            key="ncr_desc",
+        )
+        dent_threshold_mm = st.number_input(
+            "BVID detectability threshold [mm]",
+            min_value=0.05,
+            max_value=5.0,
+            value=BVID_DENT_THRESHOLD_MM,
+            step=0.05,
+            help=(
+                "Residual dent depth above which damage is treated as "
+                "visible (VID). Override with your program's "
+                "damage-tolerance value."
+            ),
+            key="ncr_dent_thr",
+        )
+
+        form = {
+            "ncr_number": ncr_number.strip() or f"NCR-{today:%Y%m%d}-001",
+            "revision": revision.strip() or "-",
+            "originator": originator.strip() or "—",
+            "date": ncr_date.isoformat(),
+            "program": program.strip() or "—",
+            "part_number": part_number.strip() or "—",
+            "part_name": part_name.strip() or "—",
+            "serial_lot": serial_lot.strip() or "—",
+            "work_order": work_order.strip() or "—",
+            "quantity": quantity.strip() or "—",
+            "station": station.strip() or "—",
+            "found_during": found_during,
+            "nc_type": nc_type,
+            "dimensions": dimensions.strip() or "—",
+            "description": description.strip(),
+        }
+
+        rec = (
+            None
+            if ncr_result is None
+            else _recommend_disposition(ncr_result, float(dent_threshold_mm))
+        )
+        ncr_md, ncr_dict = _build_ncr(form, ncr_cfg, ncr_result, rec)
+
+        if rec is not None:
+            st.success(
+                f"Proposed disposition path: **{rec['recommended_path']}** " f"— {rec['status']}"
+            )
+            if rec["flags"]:
+                st.warning("Flags:\n\n" + "\n\n".join(f"- {f}" for f in rec["flags"]))
+
+        with st.expander("Preview NCR", expanded=True):
+            st.markdown(ncr_md)
+
+        safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in form["ncr_number"])
+        dl1, dl2 = st.columns(2)
+        with dl1:
+            st.download_button(
+                "Download NCR (Markdown)",
+                data=ncr_md,
+                file_name=f"{safe_id}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+        with dl2:
+            st.download_button(
+                "Download NCR (JSON)",
+                data=json.dumps(ncr_dict, indent=2),
+                file_name=f"{safe_id}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
