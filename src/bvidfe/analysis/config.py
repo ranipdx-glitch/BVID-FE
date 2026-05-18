@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional, Sequence, Union
 
 from bvidfe.core.geometry import PanelGeometry
 from bvidfe.core.material import OrthotropicMaterial
@@ -63,11 +63,17 @@ class MeshParams:
 
 @dataclass
 class AnalysisConfig:
-    """BVID analysis configuration. Provide exactly ONE of `impact` or `damage`."""
+    """BVID analysis configuration. Provide exactly ONE of `impact` or `damage`.
+
+    ``ply_thickness_mm`` may be either a single positive ``float`` (uniform
+    laminate) or a list/tuple of positive floats with one entry per ply
+    (matching ``len(layup_deg)``). Per-ply thicknesses let users model
+    laminates that mix plies of different fabric weights or prepreg gauges.
+    """
 
     material: Union[str, OrthotropicMaterial]
     layup_deg: List[float]
-    ply_thickness_mm: float
+    ply_thickness_mm: Union[float, Sequence[float]]
     panel: PanelGeometry
     loading: Literal["compression", "tension"] = "compression"
     tier: Literal["empirical", "semi_analytical", "fe3d"] = "empirical"
@@ -80,5 +86,20 @@ class AnalysisConfig:
             raise ValueError(
                 "Provide exactly one of AnalysisConfig.impact or AnalysisConfig.damage"
             )
+        # Validate ply_thickness_mm shape against layup_deg here so callers
+        # get an early, descriptive error before Laminate construction.
+        if isinstance(self.ply_thickness_mm, (list, tuple)):
+            if len(self.ply_thickness_mm) != len(self.layup_deg):
+                raise ValueError(
+                    f"ply_thickness_mm sequence length "
+                    f"({len(self.ply_thickness_mm)}) must equal the number "
+                    f"of plies ({len(self.layup_deg)})."
+                )
+            for i, t in enumerate(self.ply_thickness_mm):
+                if not (float(t) > 0):
+                    raise ValueError(f"ply_thickness_mm[{i}] must be > 0 (got {t}).")
+        else:
+            if not (float(self.ply_thickness_mm) > 0):
+                raise ValueError(f"ply_thickness_mm must be > 0 (got {self.ply_thickness_mm}).")
         if self.tier == "fe3d" and self.mesh is None:
             self.mesh = MeshParams()

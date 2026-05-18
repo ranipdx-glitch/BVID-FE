@@ -156,7 +156,11 @@ class FeMeshSkeleton:
     centroid_y: np.ndarray  # (n_elements,) element centroid y
     cz_bot: np.ndarray  # (n_elements,) element bottom z
     cz_top: np.ndarray  # (n_elements,) element top z
-    ply_thickness_mm: float
+    # Cumulative z position of every ply boundary, length n_plies + 1.
+    # ply_top_z[k] is the bottom face of ply k; ply_top_z[k+1] its top
+    # face (== the z of interface k). Carries per-ply thickness so
+    # non-uniform laminates lay out the through-thickness grid correctly.
+    ply_top_z: np.ndarray
 
 
 def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
@@ -169,19 +173,45 @@ def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
     """
     panel = config.panel
     layup = config.layup_deg
-    h = config.ply_thickness_mm
     n_plies = len(layup)
     mesh = config.mesh if config.mesh is not None else MeshParams()
 
-    Lx, Ly, Lz = panel.Lx_mm, panel.Ly_mm, n_plies * h
+    # Resolve per-ply thicknesses: a scalar applies uniformly, a sequence
+    # gives one thickness per ply (length must equal n_plies).
+    raw_t = config.ply_thickness_mm
+    if isinstance(raw_t, (list, tuple, np.ndarray)):
+        ply_thicknesses = [float(t) for t in raw_t]
+    else:
+        ply_thicknesses = [float(raw_t)] * n_plies
+    # Cumulative ply-boundary z positions (length n_plies + 1).
+    ply_top_z = np.empty(n_plies + 1, dtype=float)
+    ply_top_z[0] = 0.0
+    for k, t in enumerate(ply_thicknesses):
+        ply_top_z[k + 1] = ply_top_z[k] + t
+
+    Lx, Ly = panel.Lx_mm, panel.Ly_mm
     nx = max(1, math.ceil(Lx / mesh.in_plane_size_mm))
     ny = max(1, math.ceil(Ly / mesh.in_plane_size_mm))
     nz = n_plies * mesh.elements_per_ply
 
-    # Nodes on a regular grid (k outer, j, i inner — matches _node_id)
+    # Nodes on a regular x-y grid; the z-grid follows per-ply thicknesses so
+    # ply boundaries (and therefore interfaces) align exactly with element
+    # faces. Each ply is subdivided into ``elements_per_ply`` equal-height
+    # elements, so element height varies between plies but is constant
+    # within a ply. For a uniform laminate this reproduces the previous
+    # ``np.linspace(0, n_plies*h, nz+1)`` grid exactly.
     x_nodes = np.linspace(0.0, Lx, nx + 1)
     y_nodes = np.linspace(0.0, Ly, ny + 1)
-    z_nodes = np.linspace(0.0, Lz, nz + 1)
+    z_segments = [np.array([0.0])]
+    for ply_i in range(n_plies):
+        z_segments.append(
+            np.linspace(
+                ply_top_z[ply_i],
+                ply_top_z[ply_i + 1],
+                mesh.elements_per_ply + 1,
+            )[1:]
+        )
+    z_nodes = np.concatenate(z_segments)
     node_coords = np.array(
         [[x, y, z] for z in z_nodes for y in y_nodes for x in x_nodes],
         dtype=float,
@@ -241,7 +271,7 @@ def build_fe_mesh_skeleton(config: AnalysisConfig) -> FeMeshSkeleton:
         centroid_y=centroid_y,
         cz_bot=cz_bot,
         cz_top=cz_top,
-        ply_thickness_mm=h,
+        ply_top_z=ply_top_z,
     )
 
 
@@ -260,7 +290,7 @@ def apply_damage(skeleton: FeMeshSkeleton, damage: DamageState) -> FeMesh:
     cy = skeleton.centroid_y
     cz_bot = skeleton.cz_bot
     cz_top = skeleton.cz_top
-    h = skeleton.ply_thickness_mm
+    ply_top_z = skeleton.ply_top_z
 
     damage_factors = np.ones(n_elem, dtype=float)
     in_plane_damage_factors = np.ones(n_elem, dtype=float)
@@ -271,7 +301,7 @@ def apply_damage(skeleton: FeMeshSkeleton, damage: DamageState) -> FeMesh:
     # vectorised "any match" result identical.
     oop_hit = np.zeros(n_elem, dtype=bool)
     for ell in damage.delaminations:
-        z_iface = (ell.interface_index + 1) * h
+        z_iface = ply_top_z[ell.interface_index + 1]
         straddles = (cz_bot <= z_iface) & (z_iface <= cz_top)
         if not straddles.any():
             continue
@@ -310,11 +340,16 @@ def _skeleton_signature(config: AnalysisConfig) -> tuple:
     the damage state changes between iterations).
     """
     mesh = config.mesh if config.mesh is not None else MeshParams()
+    raw_t = config.ply_thickness_mm
+    if isinstance(raw_t, (list, tuple, np.ndarray)):
+        t_sig: tuple = tuple(float(t) for t in raw_t)
+    else:
+        t_sig = (float(raw_t),)
     return (
         float(config.panel.Lx_mm),
         float(config.panel.Ly_mm),
         tuple(float(a) for a in config.layup_deg),
-        float(config.ply_thickness_mm),
+        t_sig,
         int(mesh.elements_per_ply),
         float(mesh.in_plane_size_mm),
     )

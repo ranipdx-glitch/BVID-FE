@@ -48,6 +48,28 @@ def _positive_float(spec: str) -> float:
     return v
 
 
+def _parse_thickness(spec: str):
+    """argparse type for ``--thickness``.
+
+    Accepts either a single positive number (uniform ply thickness) or a
+    comma-separated list of positive numbers (per-ply thicknesses, length
+    must match the layup at config-validation time).
+    """
+    if "," in spec:
+        try:
+            ts = [float(x) for x in spec.split(",")]
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                "--thickness must be a positive number or a comma-separated "
+                "list of positive numbers (got " + repr(spec) + ")"
+            ) from exc
+        for i, t in enumerate(ts):
+            if t <= 0:
+                raise argparse.ArgumentTypeError(f"--thickness[{i}] must be > 0 (got {t})")
+        return ts
+    return _positive_float(spec)
+
+
 def _existing_path(spec: str):
     """argparse type that requires a readable file at the given path."""
     from pathlib import Path
@@ -112,11 +134,19 @@ def _build_parser() -> argparse.ArgumentParser:
         type=_parse_layup,
         help="Comma-separated ply angles in degrees, e.g. 0,45,-45,90",
     )
-    p.add_argument("--thickness", type=_positive_float, help="Ply thickness in millimeters")
+    p.add_argument(
+        "--thickness",
+        type=_parse_thickness,
+        help="Ply thickness in millimeters. Either a single positive number "
+        "(uniform laminate) or a comma-separated list of per-ply thicknesses "
+        "with length equal to the number of plies in --layup, e.g. "
+        "'0.10,0.10,0.20,0.20,0.20,0.20,0.10,0.10' for a hybrid stack.",
+    )
     p.add_argument(
         "--panel",
         type=_parse_panel,
-        help="Panel dimensions as LxY in millimeters, e.g. 150x100",
+        help="Panel dimensions as 'Lx_mm x Ly_mm' in millimeters, "
+        "e.g. 150x100. Lowercase 'x' separator, no spaces.",
     )
     p.add_argument(
         "--loading",
@@ -207,6 +237,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("must provide either --energy (impact-driven) or --cscan (inspection-driven)")
     if args.energy is not None and args.cscan is not None:
         parser.error("--energy and --cscan are mutually exclusive")
+
+    # If --thickness was given as a per-ply list, its length must match the layup.
+    if isinstance(args.thickness, list) and len(args.thickness) != len(args.layup):
+        parser.error(
+            f"--thickness has {len(args.thickness)} per-ply values but --layup "
+            f"has {len(args.layup)} plies; they must match."
+        )
 
     if args.energy is not None:
         cfg = AnalysisConfig(

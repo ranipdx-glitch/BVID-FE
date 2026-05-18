@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Sequence, Union
 
 import numpy as np
 
@@ -24,6 +25,35 @@ from bvidfe.core.material import OrthotropicMaterial
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _normalise_ply_thicknesses(raw: Union[float, Sequence[float]], n_plies: int) -> list:
+    """Coerce ``raw`` to a per-ply thickness list of length ``n_plies``.
+
+    Accepts a single positive number (uniform thickness) or a sequence of
+    positive numbers (per-ply, length must match ``n_plies``). Raises
+    ``ValueError`` on any non-positive entry, length mismatch, or unsupported
+    type.
+    """
+    if isinstance(raw, (int, float)):
+        t = float(raw)
+        if t <= 0.0:
+            raise ValueError(f"ply_thickness_mm must be > 0 (got {t}).")
+        return [t] * n_plies
+    if isinstance(raw, (list, tuple, np.ndarray)):
+        ts = [float(x) for x in raw]
+        if len(ts) != n_plies:
+            raise ValueError(
+                f"ply_thickness_mm sequence length ({len(ts)}) must equal "
+                f"the number of plies ({n_plies})."
+            )
+        for i, t in enumerate(ts):
+            if t <= 0.0:
+                raise ValueError(f"ply_thickness_mm[{i}] must be > 0 (got {t}).")
+        return ts
+    raise TypeError(
+        f"ply_thickness_mm must be a float or sequence of floats " f"(got {type(raw).__name__})."
+    )
 
 
 def _reduced_stiffness(mat: OrthotropicMaterial) -> np.ndarray:
@@ -117,8 +147,10 @@ def _transform_reduced_stiffness(Q: np.ndarray, angle_rad: float) -> np.ndarray:
 class Laminate:
     """Composite laminate analyzed by Classical Lamination Theory (CLT).
 
-    All plies share the same material and uniform thickness. The stacking
-    sequence is given bottom-to-top; z = 0 is at the laminate midplane.
+    All plies share the same material; ply thicknesses may be uniform
+    (single ``float``) or per-ply (a ``list[float]`` of length ``len(layup_deg)``).
+    The stacking sequence is given bottom-to-top; z = 0 is at the laminate
+    midplane.
 
     Parameters
     ----------
@@ -126,8 +158,11 @@ class Laminate:
         Ply material (all plies use the same material).
     layup_deg : list[float]
         Ply fiber angles in degrees, ordered bottom-to-top.
-    ply_thickness_mm : float
-        Uniform ply thickness in mm.
+    ply_thickness_mm : float | Sequence[float]
+        Either a single uniform ply thickness in mm, or a sequence of per-ply
+        thicknesses with length equal to ``len(layup_deg)``. Per-ply
+        thicknesses let users model laminates that mix plies of different
+        fabric weights or prepreg gauges.
 
     Examples
     --------
@@ -138,13 +173,23 @@ class Laminate:
     >>> A, B, D = lam.abd_matrices()
     >>> import numpy as np; np.allclose(B, 0.0, atol=1e-6)
     True
+
+    Mixed ply thicknesses (e.g. a thin 0/90 surface layer over thicker
+    quasi-iso plies):
+
+    >>> lam = Laminate(material=m, layup_deg=[0, 90, 45, -45, -45, 45, 90, 0],
+    ...                ply_thickness_mm=[0.10, 0.10, 0.20, 0.20,
+    ...                                  0.20, 0.20, 0.10, 0.10])
+    >>> abs(lam.thickness_mm - 1.20) < 1e-9
+    True
     """
 
     material: OrthotropicMaterial
     layup_deg: list[float]
-    ply_thickness_mm: float
+    ply_thickness_mm: Union[float, Sequence[float]]
 
     # Computed on post-init; stored as private attributes.
+    _ply_thicknesses: list = field(init=False, repr=False)
     _A: np.ndarray = field(init=False, repr=False)
     _B: np.ndarray = field(init=False, repr=False)
     _D: np.ndarray = field(init=False, repr=False)
@@ -153,8 +198,9 @@ class Laminate:
         """Validate inputs and pre-compute ABD matrices."""
         if not self.layup_deg:
             raise ValueError("layup_deg must contain at least one ply angle.")
-        if self.ply_thickness_mm <= 0.0:
-            raise ValueError(f"ply_thickness_mm must be > 0 (got {self.ply_thickness_mm}).")
+        self._ply_thicknesses = _normalise_ply_thicknesses(
+            self.ply_thickness_mm, len(self.layup_deg)
+        )
         self._compute_abd()
 
     # ------------------------------------------------------------------
@@ -167,9 +213,25 @@ class Laminate:
         return len(self.layup_deg)
 
     @property
+    def ply_thicknesses_mm(self) -> list:
+        """Per-ply thickness list (mm) of length ``n_plies``.
+
+        Always returns a list, regardless of whether ``ply_thickness_mm`` was
+        provided as a scalar or a sequence. Internal modules that need to
+        sum, slice, or index per-ply thicknesses should use this property.
+        """
+        return list(self._ply_thicknesses)
+
+    @property
+    def is_uniform_thickness(self) -> bool:
+        """True if every ply has the same thickness."""
+        ts = self._ply_thicknesses
+        return all(t == ts[0] for t in ts)
+
+    @property
     def thickness_mm(self) -> float:
-        """Total laminate thickness (mm): n_plies * ply_thickness_mm."""
-        return self.n_plies * self.ply_thickness_mm
+        """Total laminate thickness (mm) — sum of per-ply thicknesses."""
+        return float(sum(self._ply_thicknesses))
 
     def _z_coords(self) -> np.ndarray:
         """Ply boundary z-coordinates from bottom to top (mm).
@@ -182,10 +244,9 @@ class Laminate:
             Shape (n_plies + 1,) array; z[0] = -h/2, z[-1] = +h/2.
         """
         h = self.thickness_mm
-        t = self.ply_thickness_mm
         z = np.empty(self.n_plies + 1, dtype=float)
         z[0] = -h / 2.0
-        for k in range(self.n_plies):
+        for k, t in enumerate(self._ply_thicknesses):
             z[k + 1] = z[k] + t
         return z
 
@@ -324,9 +385,14 @@ class Laminate:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
+        if self.is_uniform_thickness:
+            t_str = f"t_ply={self._ply_thicknesses[0]:.3f} mm"
+        else:
+            t_str = "t_ply=[" + ", ".join(f"{t:.3f}" for t in self._ply_thicknesses) + "] mm"
         return (
             f"Laminate(n_plies={self.n_plies}, "
             f"h={self.thickness_mm:.3f} mm, "
+            f"{t_str}, "
             f"material={self.material.name!r}, "
             f"layup={self.layup_deg})"
         )
