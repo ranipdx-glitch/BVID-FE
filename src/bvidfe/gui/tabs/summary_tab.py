@@ -77,9 +77,13 @@ def _build_limitation_notes(results: AnalysisResults) -> list[str]:
     #    quasi-static threshold may underpredict damage by 30%+.
     impact = cfg.get("impact") or {}
     mass_kg = float(impact.get("mass_kg", 0.0) or 0.0)
-    ply_t = float(cfg.get("ply_thickness_mm", 0.0) or 0.0)
+    raw_ply_t = cfg.get("ply_thickness_mm", 0.0) or 0.0
     layup = cfg.get("layup_deg") or []
-    h_total = ply_t * len(layup) if ply_t and layup else 0.0
+    if isinstance(raw_ply_t, (list, tuple)):
+        h_total = float(sum(float(t) for t in raw_ply_t))
+    else:
+        ply_t = float(raw_ply_t)
+        h_total = ply_t * len(layup) if ply_t and layup else 0.0
     rho = _density_kg_per_mm3(cfg)
     if rho and mass_kg > 0 and A_panel > 0 and h_total > 0:
         m_plate = rho * A_panel * h_total  # kg

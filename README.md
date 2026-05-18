@@ -61,6 +61,23 @@ bvidfe --material IM7/8552 \
        --energy 30
 ```
 
+Argument units and formats:
+
+- `--thickness` — ply thickness in millimeters. Either a single positive
+  number for a uniform laminate, **or** a comma-separated list of per-ply
+  thicknesses with length matching `--layup` for laminates that mix plies
+  of different fabric weights / prepreg gauges (e.g.
+  `--thickness 0.10,0.10,0.20,0.20,0.20,0.20,0.10,0.10` for an 8-ply stack
+  with thinner outer layers).
+- `--panel` — panel dimensions as `Lx_mm x Ly_mm` (e.g. `150x100`), in
+  millimeters. Use a lowercase `x` separator with no spaces; `Lx` is the
+  in-plane x-dimension (loading direction for compression/tension along x)
+  and `Ly` is the in-plane y-dimension.
+- `--energy` — impact energy in joules.
+- `--impactor-diameter` — impactor diameter in millimeters (default 16.0).
+- `--mass` — impactor mass in kilograms (default 5.5).
+- `--layup` — comma-separated ply angles in degrees, ordered bottom-to-top.
+
 ### Python API — impact-driven path
 
 ```python
@@ -84,6 +101,24 @@ cfg = AnalysisConfig(
 result = BvidAnalysis(cfg).run()
 print(result.summary())
 # -> residual CAI strength, knockdown, DPA, dent depth, per-interface delaminations
+```
+
+`ply_thickness_mm` accepts either a single ``float`` (uniform laminate) or
+a list/tuple of per-ply thicknesses with one entry per ply in
+``layup_deg``. Per-ply thicknesses let users model laminates that mix
+plies of different fabric weights or prepreg gauges:
+
+```python
+cfg = AnalysisConfig(
+    material="IM7/8552",
+    layup_deg=[0, 90, 45, -45, -45, 45, 90, 0],
+    # Thinner 0/90 surface plies over thicker quasi-iso interior:
+    ply_thickness_mm=[0.10, 0.10, 0.20, 0.20, 0.20, 0.20, 0.10, 0.10],
+    panel=PanelGeometry(Lx_mm=150, Ly_mm=100),
+    impact=ImpactEvent(energy_J=30),
+    loading="compression",
+    tier="semi_analytical",
+)
 ```
 
 ### Inspection-driven path (C-scan import)

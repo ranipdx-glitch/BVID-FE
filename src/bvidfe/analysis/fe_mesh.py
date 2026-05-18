@@ -121,22 +121,50 @@ def _point_in_ellipse(x: float, y: float, ellipse: DelaminationEllipse) -> bool:
 
 
 def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
-    """Build a structured brick mesh for the panel with per-element metadata."""
+    """Build a structured brick mesh for the panel with per-element metadata.
+
+    Supports either a uniform ply thickness (``config.ply_thickness_mm`` is a
+    scalar) or non-uniform per-ply thicknesses (``config.ply_thickness_mm`` is
+    a sequence of length ``len(layup)``). With non-uniform thicknesses, the
+    z-node grid subdivides each ply into ``mesh.elements_per_ply`` equal-thickness
+    elements within that ply, so element height varies between plies but
+    remains constant within a ply.
+    """
     panel = config.panel
     layup = config.layup_deg
-    h = config.ply_thickness_mm
     n_plies = len(layup)
     mesh = config.mesh if config.mesh is not None else MeshParams()
 
-    Lx, Ly, Lz = panel.Lx_mm, panel.Ly_mm, n_plies * h
+    # Resolve per-ply thicknesses (scalar or list).
+    raw_t = config.ply_thickness_mm
+    if isinstance(raw_t, (list, tuple, np.ndarray)):
+        ply_thicknesses = [float(t) for t in raw_t]
+    else:
+        ply_thicknesses = [float(raw_t)] * n_plies
+    # Ply boundary z-coordinates (n_plies + 1 entries) and the z position of
+    # the top of each ply, used both for the node grid and for delamination
+    # interface lookup.
+    ply_top_z = [0.0]
+    for t in ply_thicknesses:
+        ply_top_z.append(ply_top_z[-1] + t)
+
+    Lx, Ly = panel.Lx_mm, panel.Ly_mm
     nx = max(1, math.ceil(Lx / mesh.in_plane_size_mm))
     ny = max(1, math.ceil(Ly / mesh.in_plane_size_mm))
     nz = n_plies * mesh.elements_per_ply
 
-    # Nodes on a regular grid
+    # Nodes on a regular x-y grid; z-grid follows per-ply thicknesses so that
+    # ply boundaries (and therefore interfaces) align exactly with element
+    # faces in the through-thickness direction.
     x_nodes = np.linspace(0.0, Lx, nx + 1)
     y_nodes = np.linspace(0.0, Ly, ny + 1)
-    z_nodes = np.linspace(0.0, Lz, nz + 1)
+    z_nodes_list: list[float] = [0.0]
+    for ply_i in range(n_plies):
+        z_bot = ply_top_z[ply_i]
+        z_top = ply_top_z[ply_i + 1]
+        for s in range(1, mesh.elements_per_ply + 1):
+            z_nodes_list.append(z_bot + (z_top - z_bot) * (s / mesh.elements_per_ply))
+    z_nodes = np.asarray(z_nodes_list, dtype=float)
     node_coords = np.array(
         [[x, y, z] for z in z_nodes for y in y_nodes for x in x_nodes],
         dtype=float,
@@ -184,12 +212,12 @@ def build_fe_mesh(config: AnalysisConfig, damage: DamageState) -> FeMesh:
                 cz_top = z_nodes[k + 1]
                 cz_bot = z_nodes[k]
 
-                # Check delamination overlap: element straddles an interface at
-                # z = (iface + 1) * h if cz_bot < z_iface < cz_top AND
-                # (cx, cy) is inside the ellipse. Reduces only the OOP factor;
-                # in-plane stiffness is preserved (plies still intact).
+                # Check delamination overlap: element straddles an interface
+                # at z = ply_top_z[iface + 1] if cz_bot <= z_iface <= cz_top
+                # AND (cx, cy) is inside the ellipse. Reduces only the OOP
+                # factor; in-plane stiffness is preserved (plies still intact).
                 for ell in damage.delaminations:
-                    z_iface = (ell.interface_index + 1) * h
+                    z_iface = ply_top_z[ell.interface_index + 1]
                     if cz_bot <= z_iface <= cz_top:
                         if _point_in_ellipse(cx, cy, ell):
                             damage_factors[elem_idx] = DAMAGE_OOP_FACTOR

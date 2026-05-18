@@ -11,11 +11,19 @@ from bvidfe.impact.mapping import ImpactEvent
 
 
 def config_to_dict(cfg: AnalysisConfig) -> Dict[str, Any]:
-    """Convert an AnalysisConfig into a JSON-serialisable dict."""
+    """Convert an AnalysisConfig into a JSON-serialisable dict.
+
+    ``ply_thickness_mm`` is preserved as either a scalar or a list of floats,
+    matching whatever shape the original config used.
+    """
+    if isinstance(cfg.ply_thickness_mm, (list, tuple)):
+        ply_thickness_serialised: Any = [float(t) for t in cfg.ply_thickness_mm]
+    else:
+        ply_thickness_serialised = float(cfg.ply_thickness_mm)
     out: Dict[str, Any] = {
         "material": cfg.material if isinstance(cfg.material, str) else cfg.material.name,
         "layup_deg": list(cfg.layup_deg),
-        "ply_thickness_mm": cfg.ply_thickness_mm,
+        "ply_thickness_mm": ply_thickness_serialised,
         "panel": {
             "Lx_mm": cfg.panel.Lx_mm,
             "Ly_mm": cfg.panel.Ly_mm,
@@ -75,10 +83,15 @@ def config_from_dict(d: Dict[str, Any]) -> AnalysisConfig:
             in_plane_size_mm=float(m.get("in_plane_size_mm", 1.0)),
             cohesive_zone_factor=float(m.get("cohesive_zone_factor", 1.0)),
         )
+    raw_t = d["ply_thickness_mm"]
+    if isinstance(raw_t, (list, tuple)):
+        ply_thickness_mm: Any = [float(t) for t in raw_t]
+    else:
+        ply_thickness_mm = float(raw_t)
     return AnalysisConfig(
         material=d["material"],
         layup_deg=list(d["layup_deg"]),
-        ply_thickness_mm=float(d["ply_thickness_mm"]),
+        ply_thickness_mm=ply_thickness_mm,
         panel=panel,
         loading=d["loading"],
         tier=d["tier"],

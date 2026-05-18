@@ -36,18 +36,21 @@ def _pristine_strength(lam: Laminate, loading: str) -> float:
 
     For compression: sum_i t_i * (Xc*cos^2 + Yc*sin^2) / sum_i t_i
     For tension:     sum_i t_i * (Xt*cos^2 + Yt*sin^2) / sum_i t_i
+
+    The per-ply thicknesses ``t_i`` are taken from ``lam.ply_thicknesses_mm``,
+    so non-uniform laminates weight each ply by its actual thickness.
     """
     m = lam.material
     total_t = 0.0
     num = 0.0
-    for theta in lam.layup_deg:
+    for theta, t_i in zip(lam.layup_deg, lam.ply_thicknesses_mm):
         c2 = math.cos(math.radians(theta)) ** 2
         s2 = math.sin(math.radians(theta)) ** 2
         if loading == "compression":
-            num += lam.ply_thickness_mm * (m.Xc * c2 + m.Yc * s2)
+            num += t_i * (m.Xc * c2 + m.Yc * s2)
         else:
-            num += lam.ply_thickness_mm * (m.Xt * c2 + m.Yt * s2)
-        total_t += lam.ply_thickness_mm
+            num += t_i * (m.Xt * c2 + m.Yt * s2)
+        total_t += t_i
     return num / total_t
 
 

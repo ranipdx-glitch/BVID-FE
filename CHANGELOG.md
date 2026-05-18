@@ -6,6 +6,35 @@ All notable changes to BVID-FE are documented in this file.
 
 In-progress work toward v0.2.0. No tag yet.
 
+### Added
+
+- **Per-ply thickness support (issue #5).** ``Laminate.ply_thickness_mm``,
+  ``AnalysisConfig.ply_thickness_mm``, and the CLI ``--thickness`` flag now
+  accept either a single positive number (uniform laminate, the legacy
+  behaviour) **or** a list/tuple of per-ply thicknesses with one entry per
+  ply in the layup. This lets users model laminates that mix plies of
+  different fabric weights or prepreg gauges (for example, a thinner
+  surface 0/90 over a thicker quasi-iso interior) without faking it via
+  effective uniform thickness. ``Laminate`` exposes the resolved per-ply
+  list through the new ``ply_thicknesses_mm`` property and reports
+  ``is_uniform_thickness``; the CLT ABD assembly, the ``_pristine_strength``
+  thickness-weighted ply average, the semi-analytical sublaminate
+  selection (``find_critical_interface``, ``semi_analytical_cai``), and the
+  fe3d hex-mesh z-grid (``build_fe_mesh``) all consume the per-ply list
+  directly. A uniform list reproduces scalar results bit-for-bit (verified
+  in ``tests/test_per_ply_thickness.py``); the ``--thickness`` CLI argument
+  accepts the same comma-separated form as ``--layup`` with a length-match
+  check at parse time. Closes #5.
+
+- **CLI ``--panel`` documentation clarified (issue #4).** The README's
+  "Command-line interface" section now spells out that ``--panel`` takes
+  ``Lx_mm x Ly_mm`` in millimeters (lowercase ``x`` separator, no spaces),
+  with explicit definitions for ``--thickness``, ``--energy``,
+  ``--impactor-diameter``, ``--mass``, and ``--layup`` units. The
+  ``--panel`` argparse help text was also tightened from ``"as LxY in
+  millimeters"`` (typographical placeholder) to ``"as 'Lx_mm x Ly_mm' in
+  millimeters"``. Closes #4.
+
 ### Fixed (CI / infrastructure)
 
 - **The CI pipeline is green again on Linux, macOS, and Windows.** The

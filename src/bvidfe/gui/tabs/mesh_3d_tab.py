@@ -103,8 +103,21 @@ class Mesh3DTab(QWidget):
         panel = config.panel
         layup = config.layup_deg
         n_plies = len(layup)
-        h_ply = config.ply_thickness_mm
-        h_total = n_plies * h_ply
+        # Resolve a per-ply thickness list so mixed-thickness laminates
+        # render correctly. ``ply_top_z`` carries the z position of each ply
+        # boundary (length n_plies + 1); the side/front views consume it.
+        raw_t = config.ply_thickness_mm
+        if isinstance(raw_t, (list, tuple)):
+            ply_thicknesses = [float(t) for t in raw_t]
+        else:
+            ply_thicknesses = [float(raw_t)] * n_plies
+        ply_top_z: list[float] = [0.0]
+        for t in ply_thicknesses:
+            ply_top_z.append(ply_top_z[-1] + t)
+        h_total = ply_top_z[-1]
+        # Representative thickness for the summary text panel only.
+        h_ply_repr = ply_thicknesses[0] if ply_thicknesses else 0.0
+        uniform = all(t == ply_thicknesses[0] for t in ply_thicknesses) if ply_thicknesses else True
         Lx, Ly = panel.Lx_mm, panel.Ly_mm
 
         fig = self.canvas.figure
@@ -117,18 +130,22 @@ class Mesh3DTab(QWidget):
 
         # --- Side view (x-z) — damaged interfaces along x ---
         ax_side = fig.add_subplot(gs[0, 1])
-        _draw_side_view(ax_side, damage, Lx, h_total, h_ply, n_plies, axis="x")
+        _draw_side_view(ax_side, damage, Lx, h_total, ply_top_z, axis="x")
 
         # --- Front view (y-z) — damaged interfaces along y ---
         ax_front = fig.add_subplot(gs[1, 0])
-        _draw_side_view(ax_front, damage, Ly, h_total, h_ply, n_plies, axis="y")
+        _draw_side_view(ax_front, damage, Ly, h_total, ply_top_z, axis="y")
 
         # --- Summary text panel ---
         ax_info = fig.add_subplot(gs[1, 1])
         ax_info.set_axis_off()
+        if uniform:
+            layup_line = f"Layup: {len(layup)} plies, {h_ply_repr:.3f} mm each\n\n"
+        else:
+            layup_line = f"Layup: {len(layup)} plies, mixed thickness\n\n"
         info = (
             f"Panel: {Lx:.0f} x {Ly:.0f} x {h_total:.3f} mm\n"
-            f"Layup: {len(layup)} plies, {h_ply:.3f} mm each\n\n"
+            f"{layup_line}"
             f"Damage state:\n"
             f"  DPA: {damage.projected_damage_area_mm2:.0f} mm^2\n"
             f"  Dent: {damage.dent_depth_mm:.3f} mm\n"
@@ -187,16 +204,21 @@ def _draw_top_view(ax, damage, panel, n_plies: int) -> None:
 
 
 def _draw_side_view(
-    ax, damage, extent_mm: float, h_total: float, h_ply: float, n_plies: int, axis: str
+    ax, damage, extent_mm: float, h_total: float, ply_top_z: list, axis: str
 ) -> None:
     """Projection of delamination ellipses onto an (axis, z) slice.
 
     axis="x" -> side view over x, side view is x on horizontal, z on vertical
     axis="y" -> front view over y
+
+    ``ply_top_z`` is the cumulative z position of each ply boundary
+    (length ``n_plies + 1``), so non-uniform laminates draw their guide
+    lines and interface positions correctly.
     """
     import matplotlib.pyplot as plt
 
     cmap = plt.get_cmap("viridis")
+    n_plies = len(ply_top_z) - 1
     ax.set_xlim(0, extent_mm)
     ax.set_ylim(0, h_total)
     ax.set_aspect("auto")
@@ -204,16 +226,16 @@ def _draw_side_view(
     ax.set_ylabel("z [mm] (through thickness)")
     ax.set_title(f"{'Side' if axis == 'x' else 'Front'} view ({axis}-z)")
 
-    # Ply stack horizontal guide lines
-    for i in range(n_plies + 1):
-        z = i * h_ply
+    # Ply stack horizontal guide lines (one per ply boundary, including top
+    # and bottom faces).
+    for z in ply_top_z:
         ax.axhline(z, color="lightgrey", linewidth=0.4)
 
     for e in damage.delaminations:
-        # The delamination sits at interface_index * h_ply (z = bottom of ply index+1)
-        # Project the ellipse onto the chosen plane. We represent it as a
-        # horizontal bar at the interface z, extending +/- semi-axis along axis.
-        z = (e.interface_index + 1) * h_ply
+        # The delamination sits at the top face of ply ``interface_index``;
+        # project the ellipse onto the chosen plane as a horizontal bar at
+        # the interface z, extending +/- semi-axis along ``axis``.
+        z = ply_top_z[e.interface_index + 1]
         if axis == "x":
             center = e.centroid_mm[0]
             # Effective half-extent along x: project rotated ellipse.
