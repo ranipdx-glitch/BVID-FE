@@ -13,7 +13,6 @@ import time
 from typing import List
 
 import numpy as np
-import scipy.sparse as sp
 
 from bvidfe.analysis.config import AnalysisConfig
 from bvidfe.analysis.fe_mesh import FeMesh, build_fe_mesh, estimate_fe_mesh_size
@@ -22,7 +21,7 @@ from bvidfe.damage.state import DamageState
 from bvidfe.elements.hex8 import Hex8Element, build_geometry_table
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
-from bvidfe.solver.assembler import assemble_global_stiffness
+from bvidfe.solver.assembler import assemble_coo, assemble_global_stiffness
 from bvidfe.solver.boundary import (
     BoundaryCondition,
     apply_dirichlet_penalty,
@@ -440,24 +439,18 @@ def fe3d_cai_buckling(
     # because the plies remain intact; only fiber-break-core elements carry less.
     sigma_bar_ref = np.zeros((3, 3))
     sigma_bar_ref[0, 0] = sigma_ref_MPa
+    in_plane_factors = mesh.in_plane_damage_factors
 
-    # Vectorised COO assembly of K_g (same pattern as assembler.py)
-    rows_chunks: list[np.ndarray] = []
-    cols_chunks: list[np.ndarray] = []
-    data_chunks: list[np.ndarray] = []
-    for eidx, elem in enumerate(elements):
-        damage_f = float(mesh.in_plane_damage_factors[eidx])
-        sigma_elem = sigma_bar_ref * damage_f
-        Kg_e = elem.geometric_stiffness_matrix(sigma_elem)
-        dof_arr = np.asarray(mesh.element_dof_maps[eidx], dtype=np.int64)
-        rows_chunks.append(np.broadcast_to(dof_arr[:, None], (24, 24)).ravel())
-        cols_chunks.append(np.broadcast_to(dof_arr[None, :], (24, 24)).ravel())
-        data_chunks.append(Kg_e.ravel())
-    rows = np.concatenate(rows_chunks) if rows_chunks else np.array([], dtype=np.int64)
-    cols = np.concatenate(cols_chunks) if cols_chunks else np.array([], dtype=np.int64)
-    data = np.concatenate(data_chunks) if data_chunks else np.array([], dtype=float)
+    def _kg(e_idx: int) -> np.ndarray:
+        return elements[e_idx].geometric_stiffness_matrix(
+            sigma_bar_ref * float(in_plane_factors[e_idx])
+        )
 
-    Kg = sp.coo_matrix((data, (rows, cols)), shape=(K.shape[0], K.shape[0])).tocsc()
+    # Share the COO assembler with assemble_global_stiffness so the two
+    # build paths cannot drift, and re-use its pre-allocated buffers
+    # (issue #33: the old list-of-chunks build doubled peak memory near
+    # the FE3D_MAX_DOF cap and SIGKILLed on 16 GB workstations).
+    Kg = assemble_coo(mesh.element_dof_maps, mesh.n_dof, _kg)
     _t("Kg assembled", t0)
 
     # Apply penalty BCs to K (not Kg) — rigid-body suppression plus
@@ -498,6 +491,10 @@ def fe3d_cai_buckling(
             bcs.append(BoundaryCondition(dof=3 * int(node_idx) + 2, value=0.0))
     F_dummy = np.zeros(n_dof)
     K_mod, _ = apply_dirichlet_penalty(K, F_dummy, bcs, penalty=1.0e10)
+    # apply_dirichlet_penalty returns a fresh CSC matrix; the un-penalised K
+    # is not used downstream. Drop it so its memory is freed before the
+    # eigensolver allocates ARPACK workspaces (issue #33).
+    del K
 
     # Solve generalised eigenproblem K phi = lambda K_g phi for smallest positive eig.
     try:
