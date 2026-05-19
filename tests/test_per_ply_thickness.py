@@ -215,8 +215,9 @@ def test_sublaminate_selection_uses_thickness_not_ply_count():
                     best = cand
         return best
 
-    N_upper_ref = _ref_Ncr(D_upper, ell.major_mm, ell.minor_mm)
-    N_lower_ref = _ref_Ncr(D_lower, ell.major_mm, ell.minor_mm)
+    # (a, b) are FULL plate side lengths (= 2 * ellipse semi-axes); see #29.
+    N_upper_ref = _ref_Ncr(D_upper, 2.0 * ell.major_mm, 2.0 * ell.minor_mm)
+    N_lower_ref = _ref_Ncr(D_lower, 2.0 * ell.major_mm, 2.0 * ell.minor_mm)
     assert N_lower_ref < N_upper_ref  # thinner stack buckles at lower load
 
     # The function must report the *lower* (geometrically thinner)
