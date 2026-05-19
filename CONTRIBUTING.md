@@ -55,6 +55,19 @@ pip install pre-commit
 pre-commit install
 ```
 
+### Before committing
+
+If you haven't installed pre-commit, run these three commands locally before
+pushing — CI runs `black --check` and **will fail** if any file is not
+already formatted, so you must auto-format with `black` (not just verify
+with `black --check`):
+
+```bash
+ruff check src tests
+black src tests        # auto-format in place; do NOT use --check here
+pytest -q
+```
+
 ## Pull Requests
 
 1. Fork the repository
