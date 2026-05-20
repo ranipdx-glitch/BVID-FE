@@ -33,6 +33,9 @@ from __future__ import annotations
 
 import math
 import warnings
+from functools import lru_cache
+
+import numpy as np
 
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
@@ -59,6 +62,35 @@ _BOUNDARY_BENDING_FACTOR: dict[str, float] = {
 _CONICAL_HALF_ANGLE_DEG: float = 30.0
 
 
+@lru_cache(maxsize=64)
+def _navier_basis_ssss(
+    Lx_mm: float,
+    Ly_mm: float,
+    x0: float,
+    y0: float,
+    n_modes: int = NAVIER_N,
+) -> np.ndarray:
+    """Cached geometric Navier basis for a simply-supported rectangular plate.
+
+    Returns a read-only ``(n_modes, n_modes)`` array whose ``(m-1, n-1)`` entry
+    is ``sin^2(m*pi*x0/Lx_mm) * sin^2(n*pi*y0/Ly_mm)``. This factor depends
+    only on the panel geometry and the impact location, not on the laminate,
+    so it can be reused across energy-sweep iterations that vary only the
+    laminate stack or material properties.
+
+    The result is marked read-only via ``arr.setflags(write=False)`` so cache
+    hits cannot be polluted by callers mutating the array. Callers that need
+    to mutate should copy first.
+    """
+    m_idx = np.arange(1, n_modes + 1, dtype=float)
+    n_idx = np.arange(1, n_modes + 1, dtype=float)
+    sin_mx = np.sin(m_idx * math.pi * x0 / Lx_mm)
+    sin_ny = np.sin(n_idx * math.pi * y0 / Ly_mm)
+    basis = (sin_mx[:, None] ** 2) * (sin_ny[None, :] ** 2)
+    basis.setflags(write=False)
+    return basis
+
+
 def _k_bending_ssss(
     lam: Laminate,
     pan: PanelGeometry,
@@ -77,18 +109,13 @@ def _k_bending_ssss(
     _, _, D = lam.abd_matrices()
     D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
     a, b = pan.Lx_mm, pan.Ly_mm
-    w_over_P = 0.0
-    for m in range(1, n_modes + 1):
-        for n in range(1, n_modes + 1):
-            sin_mx = math.sin(m * math.pi * x0 / a)
-            sin_ny = math.sin(n * math.pi * y0 / b)
-            Dmn = (
-                D11 * (m * math.pi / a) ** 4
-                + 2 * (D12 + 2 * D66) * (m * math.pi / a) ** 2 * (n * math.pi / b) ** 2
-                + D22 * (n * math.pi / b) ** 4
-            )
-            w_over_P += (sin_mx * sin_ny) ** 2 / Dmn
-    w_over_P *= 4.0 / (a * b)
+    basis = _navier_basis_ssss(a, b, x0, y0, n_modes)
+    m_idx = np.arange(1, n_modes + 1, dtype=float)
+    n_idx = np.arange(1, n_modes + 1, dtype=float)
+    km = (m_idx * math.pi / a)[:, None]
+    kn = (n_idx * math.pi / b)[None, :]
+    Dmn = D11 * km**4 + 2.0 * (D12 + 2.0 * D66) * (km**2) * (kn**2) + D22 * kn**4
+    w_over_P = float(np.sum(basis / Dmn)) * 4.0 / (a * b)
     return 1.0 / w_over_P
 
 
