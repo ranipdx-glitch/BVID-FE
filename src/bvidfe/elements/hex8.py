@@ -10,6 +10,7 @@ Natural coordinates xi, eta, zeta in [-1, 1].
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 
 import numpy as np
@@ -90,8 +91,17 @@ _NODE_COORDS = np.array(
 )
 
 
+@functools.lru_cache(maxsize=64)
 def _T_sigma_z(theta_rad: float) -> np.ndarray:
-    """Voigt stress transformation matrix for rotation about the z-axis."""
+    """Voigt stress transformation matrix for rotation about the z-axis.
+
+    Cached on ``theta_rad`` because a typical mesh has 1e4-1e5 elements but
+    only a handful of distinct ply angles (e.g. a [0/45/-45/90] layup has
+    four), so the same 6x6 matrix is otherwise recomputed thousands of times.
+    The returned array is marked read-only so that downstream callers cannot
+    silently corrupt the cached entry via in-place mutation; ``_compute_
+    global_stiffness`` only reads ``T`` via ``T @ C @ T.T``, which is safe.
+    """
     c, s = np.cos(theta_rad), np.sin(theta_rad)
     T = np.array(
         [
@@ -104,6 +114,7 @@ def _T_sigma_z(theta_rad: float) -> np.ndarray:
         ],
         dtype=float,
     )
+    T.setflags(write=False)
     return T
 
 
