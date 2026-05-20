@@ -76,6 +76,10 @@ pytest -q
 4. Ensure all 149+ tests pass (`pytest tests/ -v`)
 5. Submit a pull request with a clear description of what was changed and why
 
+## Examples
+
+Runnable examples live in `examples/`. The script set (`01_empirical_quick.py` ... `05_tier_comparison_sweep.py`) covers the headless workflows; `examples/quickstart.ipynb` is an annotated Jupyter notebook that mirrors `01_empirical_quick.py` with LaTeX derivations of the Olsson, Soutis, and Whitney-Nuismer models plus inline Plotly visualisations. **Strip notebook outputs before committing** with `nbstripout examples/quickstart.ipynb` (`pip install nbstripout`); commits with output cells will be flagged in review.
+
 ## Adding New Materials
 
 Add a new entry to `MATERIAL_PRESETS` in `src/bvidfe/core/material.py` using the `OrthotropicMaterial` dataclass. Include all orthotropic stiffness constants (MPa), strength values (MPa), interlaminar fracture toughnesses (N/mm), and density (kg/mm^3). Include a literature source reference in the docstring. Add tests in `tests/core/test_material.py`.
