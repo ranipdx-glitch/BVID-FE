@@ -378,7 +378,19 @@ class Laminate:
         float
             Effective bending stiffness D_eff (N*mm).
         """
-        return math.sqrt(self._D[0, 0] * self._D[1, 1])
+        # Guard against a non-positive or non-finite D11/D22 product: a degenerate
+        # bending matrix (e.g. from a pathological layup or corrupted _D) would
+        # otherwise yield NaN from math.sqrt of a negative number, or silently
+        # propagate a non-physical zero/Inf into downstream impact criteria.
+        D11 = float(self._D[0, 0])
+        D22 = float(self._D[1, 1])
+        if not (np.isfinite(D11) and np.isfinite(D22)) or D11 <= 0.0 or D22 <= 0.0:
+            raise ValueError(
+                f"flexural_rigidity_Deff requires positive bending stiffness; "
+                f"got D[0,0]={D11} and D[1,1]={D22}. Check layup / "
+                f"ply_thickness_mm consistency."
+            )
+        return math.sqrt(D11 * D22)
 
     # ------------------------------------------------------------------
     # Representation
