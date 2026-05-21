@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bvidfe"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Barely Visible Impact Damage residual-strength analysis for composite laminates"
 readme = "README.md"
 license = {text = "MIT"}

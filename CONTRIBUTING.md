@@ -104,6 +104,48 @@ any drift. It is informational only (always exits 0) and prevents agents from
 delegating commits while formatting is broken. If `black`/`ruff` are not
 installed yet, the hook prints a friendly note and exits cleanly.
 
+## Releasing
+
+BVID-FE publishes to PyPI via **OIDC Trusted Publishing** — there is no
+long-lived API token stored in the repo. The release flow is driven by
+`.github/workflows/publish.yml`, which triggers on any tag matching `v*`.
+
+### One-time PyPI setup (maintainer only)
+
+Trusted Publishing must be configured **once** on PyPI for this repo. See
+[PyPI's Trusted Publishing docs](https://docs.pypi.org/trusted-publishers/)
+for the canonical instructions. Register a pending or existing publisher
+with:
+
+- **Repository owner:** `ranipdx-glitch`
+- **Repository name:** `BVID-FE`
+- **Workflow filename:** `publish.yml`
+- **Environment name:** `release`
+
+A matching GitHub Actions environment named `release` must also exist on
+the repo (Settings → Environments → New environment → `release`). The
+workflow declares `environment: release`, so it will queue indefinitely
+until that environment is created — which is the intended fail-safe.
+
+### Cut-a-release flow
+
+1. Bump `[project].version` in `pyproject.toml` (e.g. `0.2.0` →
+   `0.2.1` for a patch, `0.3.0` for a feature release).
+2. Update `CHANGELOG.md`: move the `## [Unreleased]` notes into a
+   new `## [X.Y.Z] - YYYY-MM-DD` section (today's date) and leave a
+   fresh empty `## [Unreleased]` above it.
+3. Commit those two changes on `main`.
+4. Tag the commit with `git tag vX.Y.Z` (note the leading `v`) and
+   push with `git push origin vX.Y.Z`.
+5. The `Publish to PyPI` workflow takes over: it verifies the tag
+   matches `pyproject.toml`, builds an sdist + wheel, runs
+   `twine check`, and uploads to PyPI through OIDC. No manual token
+   handling.
+
+If the tag/version check fails, delete the tag (`git push --delete
+origin vX.Y.Z` and `git tag -d vX.Y.Z`), fix the version mismatch,
+and re-tag.
+
 ## Code of Conduct
 
 Be respectful. Focus feedback on code and ideas, not people. Contributions at any experience level are welcome.
