@@ -41,6 +41,39 @@ def test_D_eff_positive():
     assert lam.flexural_rigidity_Deff() > 0
 
 
+def test_flexural_rigidity_Deff_returns_positive_finite_float():
+    """Issue #107 regression: the new D[0,0]/D[1,1] positivity guard must NOT
+    false-trigger on a normal laminate."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(material=m, layup_deg=[0, 45, -45, 90] * 4, ply_thickness_mm=0.152)
+    D_eff = lam.flexural_rigidity_Deff()
+    assert isinstance(D_eff, float)
+    assert np.isfinite(D_eff)
+    assert D_eff > 0.0
+
+
+def test_flexural_rigidity_Deff_raises_on_zero_D():
+    """Issue #107: a degenerate bending matrix with non-positive D[0,0] or
+    D[1,1] must raise loudly rather than feeding a negative/zero into sqrt
+    and corrupting the Olsson impact threshold downstream."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(material=m, layup_deg=[0, 45, -45, 90] * 4, ply_thickness_mm=0.152)
+    # Corrupt the cached D so both diagonal terms are non-positive.
+    lam._D = np.zeros((3, 3), dtype=float)
+    with pytest.raises(ValueError, match=r"D\[0,0\].*D\[1,1\]"):
+        lam.flexural_rigidity_Deff()
+
+
+def test_flexural_rigidity_Deff_raises_on_negative_D11():
+    """Issue #107: even a single non-positive diagonal component must trip
+    the guard, with both field names surfaced in the error message."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(material=m, layup_deg=[0, 45, -45, 90] * 4, ply_thickness_mm=0.152)
+    lam._D[0, 0] = -1.0
+    with pytest.raises(ValueError, match=r"D\[0,0\].*D\[1,1\]"):
+        lam.flexural_rigidity_Deff()
+
+
 def test_effective_engineering_constants_valid_laminate_finite_positive():
     """Issue #21 regression: the new ill-conditioning guard must NOT
     false-trigger on a normal laminate."""
