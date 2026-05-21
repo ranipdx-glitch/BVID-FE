@@ -41,6 +41,10 @@ pytest -v
 
 ## Quick Start
 
+### Try it in Jupyter
+
+The fastest tour of the physics is [`examples/quickstart.ipynb`](examples/quickstart.ipynb) — a runnable notebook that walks through the Olsson damage threshold, peanut-template DPA distribution, Soutis CAI, and Whitney-Nuismer TAI with LaTeX derivations and inline Plotly damage map / knockdown sweep / 3D damage mesh visualisations. Open it with `jupyter notebook examples/quickstart.ipynb` (after `pip install -e . jupyter`).
+
 ### Streamlit web app
 
 ```bash
