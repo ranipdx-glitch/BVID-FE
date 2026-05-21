@@ -14,12 +14,12 @@ from typing import List
 
 import numpy as np
 
+from bvidfe._types import CriterionName
 from bvidfe.analysis.config import AnalysisConfig
 from bvidfe.analysis.fe_mesh import FeMesh, build_fe_mesh, estimate_fe_mesh_size
 from bvidfe.core.laminate import Laminate
 from bvidfe.damage.state import DamageState
 from bvidfe.elements.hex8 import Hex8Element, build_geometry_table
-from bvidfe.failure.evaluator import CriterionName
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 from bvidfe.solver.assembler import assemble_coo, assemble_global_stiffness
