@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+_COHESIVE_SHEAR_FLOOR = 1e-12  # relative threshold for tangential separation magnitude
+
 
 @dataclass
 class CohesiveSurfaceElement:
@@ -96,7 +98,7 @@ class CohesiveSurfaceElement:
         T_t_mag = self._scalar_traction(d_t_mag, self._delta_0_II(), self._delta_f_II())
 
         # Decompose shear back onto tangential directions
-        if d_t_mag > 0:
+        if d_t_mag > _COHESIVE_SHEAR_FLOOR * max(abs(d_t1), abs(d_t2), _COHESIVE_SHEAR_FLOOR):
             T_t1 = T_t_mag * d_t1 / d_t_mag
             T_t2 = T_t_mag * d_t2 / d_t_mag
         else:
