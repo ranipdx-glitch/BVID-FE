@@ -53,8 +53,14 @@ def linear_buckling(
         modes = modes_all[:, order[:n_modes]]
         return eigs, modes
 
-    # Large sparse path: shift-invert with sigma=0
-    eigs, modes = eigsh(K_csc, k=n_modes, M=Kg_csc, sigma=0.0, which="LM")
+    # Large sparse path: shift-invert with sigma=0.
+    # A deterministic v0 keeps ARPACK reproducible across runs. Without it,
+    # scipy seeds from numpy's global random state, so test ordering (or any
+    # upstream consumer of np.random) can flip ARPACK's convergence path on
+    # problems with nearly-degenerate buckling modes.
+    rng = np.random.default_rng(0)
+    v0 = rng.standard_normal(n)
+    eigs, modes = eigsh(K_csc, k=n_modes, M=Kg_csc, sigma=0.0, which="LM", v0=v0)
     order = np.argsort(eigs)
     return eigs[order], modes[:, order]
 
