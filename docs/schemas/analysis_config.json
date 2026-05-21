@@ -1,0 +1,363 @@
+{
+  "$defs": {
+    "DamageState": {
+      "additionalProperties": false,
+      "description": "Full BVID damage description handed between impact mapping and solvers.",
+      "properties": {
+        "delaminations": {
+          "items": {
+            "$ref": "#/$defs/DelaminationEllipse"
+          },
+          "type": "array"
+        },
+        "dent_depth_mm": {
+          "type": "number"
+        },
+        "fiber_break_radius_mm": {
+          "type": "number"
+        }
+      },
+      "title": "DamageState",
+      "type": "object"
+    },
+    "DelaminationEllipse": {
+      "additionalProperties": false,
+      "description": "A single delamination at a specific ply interface, in the panel XY frame.",
+      "properties": {
+        "centroid_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "interface_index": {
+          "type": "integer"
+        },
+        "major_mm": {
+          "type": "number"
+        },
+        "minor_mm": {
+          "type": "number"
+        },
+        "orientation_deg": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "interface_index",
+        "centroid_mm",
+        "major_mm",
+        "minor_mm",
+        "orientation_deg"
+      ],
+      "title": "DelaminationEllipse",
+      "type": "object"
+    },
+    "ImpactEvent": {
+      "additionalProperties": false,
+      "description": "Parameters describing a single impact event.",
+      "properties": {
+        "energy_J": {
+          "type": "number"
+        },
+        "impactor": {
+          "$ref": "#/$defs/ImpactorGeometry"
+        },
+        "location_xy_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "mass_kg": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "energy_J"
+      ],
+      "title": "ImpactEvent",
+      "type": "object"
+    },
+    "ImpactorGeometry": {
+      "additionalProperties": false,
+      "description": "Impactor used in a simulated drop/impact event.",
+      "properties": {
+        "diameter_mm": {
+          "type": "number"
+        },
+        "shape": {
+          "enum": [
+            "hemispherical",
+            "flat",
+            "conical"
+          ],
+          "type": "string"
+        }
+      },
+      "title": "ImpactorGeometry",
+      "type": "object"
+    },
+    "MeshParams": {
+      "additionalProperties": false,
+      "description": "Mesh resolution parameters for the ``tier=\"fe3d\"`` solve.",
+      "properties": {
+        "cohesive_zone_factor": {
+          "type": "number"
+        },
+        "elements_per_ply": {
+          "type": "integer"
+        },
+        "in_plane_size_mm": {
+          "type": "number"
+        }
+      },
+      "title": "MeshParams",
+      "type": "object"
+    },
+    "OrthotropicMaterial": {
+      "additionalProperties": false,
+      "description": "Orthotropic composite ply material with strengths, toughnesses, and",
+      "properties": {
+        "E11": {
+          "type": "number"
+        },
+        "E22": {
+          "type": "number"
+        },
+        "G12": {
+          "type": "number"
+        },
+        "G13": {
+          "type": "number"
+        },
+        "G23": {
+          "type": "number"
+        },
+        "G_IIc": {
+          "type": "number"
+        },
+        "G_Ic": {
+          "type": "number"
+        },
+        "S12": {
+          "type": "number"
+        },
+        "S13": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "S23": {
+          "type": "number"
+        },
+        "Xc": {
+          "type": "number"
+        },
+        "Xt": {
+          "type": "number"
+        },
+        "Yc": {
+          "type": "number"
+        },
+        "Yt": {
+          "type": "number"
+        },
+        "Zc": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "Zt": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dent_beta": {
+          "type": "number"
+        },
+        "dent_gamma": {
+          "type": "number"
+        },
+        "fiber_break_E_threshold": {
+          "type": "number"
+        },
+        "fiber_break_eta": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nu12": {
+          "type": "number"
+        },
+        "olsson_alpha": {
+          "type": "number"
+        },
+        "rho": {
+          "type": "number"
+        },
+        "soutis_k_s": {
+          "type": "number"
+        },
+        "soutis_m": {
+          "type": "number"
+        },
+        "wn_d0_mm": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "E11",
+        "E22",
+        "nu12",
+        "G12",
+        "G13",
+        "G23",
+        "Xt",
+        "Xc",
+        "Yt",
+        "Yc",
+        "S12",
+        "S23",
+        "G_Ic",
+        "G_IIc",
+        "rho"
+      ],
+      "title": "OrthotropicMaterial",
+      "type": "object"
+    },
+    "PanelGeometry": {
+      "additionalProperties": false,
+      "description": "In-plane rectangular panel with boundary condition.",
+      "properties": {
+        "Lx_mm": {
+          "type": "number"
+        },
+        "Ly_mm": {
+          "type": "number"
+        },
+        "boundary": {
+          "enum": [
+            "clamped",
+            "simply_supported",
+            "free"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "Lx_mm",
+        "Ly_mm"
+      ],
+      "title": "PanelGeometry",
+      "type": "object"
+    }
+  },
+  "$id": "https://ranipdx-glitch.github.io/BVID-FE/schemas/analysis_config.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "BVID analysis configuration. Provide exactly ONE of `impact` or `damage`.",
+  "properties": {
+    "damage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DamageState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "impact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImpactEvent"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "layup_deg": {
+      "items": {
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "loading": {
+      "enum": [
+        "compression",
+        "tension"
+      ],
+      "type": "string"
+    },
+    "material": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/OrthotropicMaterial"
+        }
+      ]
+    },
+    "mesh": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MeshParams"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "panel": {
+      "$ref": "#/$defs/PanelGeometry"
+    },
+    "ply_thickness_mm": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "description": "Unresolved annotation typing.Sequence[float]"
+        }
+      ]
+    },
+    "tier": {
+      "enum": [
+        "empirical",
+        "semi_analytical",
+        "fe3d"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "material",
+    "layup_deg",
+    "ply_thickness_mm",
+    "panel"
+  ],
+  "title": "AnalysisConfig",
+  "type": "object"
+}

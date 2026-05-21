@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "DamageState": {
+      "additionalProperties": false,
+      "description": "Full BVID damage description handed between impact mapping and solvers.",
+      "properties": {
+        "delaminations": {
+          "items": {
+            "$ref": "#/$defs/DelaminationEllipse"
+          },
+          "type": "array"
+        },
+        "dent_depth_mm": {
+          "type": "number"
+        },
+        "fiber_break_radius_mm": {
+          "type": "number"
+        }
+      },
+      "title": "DamageState",
+      "type": "object"
+    },
+    "DelaminationEllipse": {
+      "additionalProperties": false,
+      "description": "A single delamination at a specific ply interface, in the panel XY frame.",
+      "properties": {
+        "centroid_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "interface_index": {
+          "type": "integer"
+        },
+        "major_mm": {
+          "type": "number"
+        },
+        "minor_mm": {
+          "type": "number"
+        },
+        "orientation_deg": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "interface_index",
+        "centroid_mm",
+        "major_mm",
+        "minor_mm",
+        "orientation_deg"
+      ],
+      "title": "DelaminationEllipse",
+      "type": "object"
+    },
+    "FieldResults": {
+      "additionalProperties": false,
+      "description": "Per-mesh field outputs reserved for the 3D FE tier.",
+      "properties": {
+        "buckling_mode_shape": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cohesive_damage": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "displacement": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": "array"
+        },
+        "failure_index": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": "array"
+        },
+        "strain_global": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": "array"
+        },
+        "stress_global": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": "array"
+        },
+        "stress_local": {
+          "description": "numpy.ndarray (ndarray) \u2014 serialised as a nested list.",
+          "type": "array"
+        }
+      },
+      "required": [
+        "displacement",
+        "stress_global",
+        "strain_global",
+        "stress_local",
+        "failure_index"
+      ],
+      "title": "FieldResults",
+      "type": "object"
+    }
+  },
+  "$id": "https://ranipdx-glitch.github.io/BVID-FE/schemas/analysis_results.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Outcome of a single ``BvidAnalysis.run()`` invocation.",
+  "properties": {
+    "buckling_eigenvalues": {
+      "items": {
+        "type": "number"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "config_snapshot": {
+      "additionalProperties": {
+        "description": "Python type Any (no JSON Schema mapping)"
+      },
+      "type": "object"
+    },
+    "critical_sublaminate": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "damage": {
+      "$ref": "#/$defs/DamageState"
+    },
+    "dpa_mm2": {
+      "type": "number"
+    },
+    "field_results": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FieldResults"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "knockdown": {
+      "type": "number"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pristine_strength_MPa": {
+      "type": "number"
+    },
+    "residual_strength_MPa": {
+      "type": "number"
+    },
+    "tier_used": {
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "residual_strength_MPa",
+    "pristine_strength_MPa",
+    "knockdown",
+    "damage",
+    "dpa_mm2",
+    "tier_used",
+    "config_snapshot"
+  ],
+  "title": "AnalysisResults",
+  "type": "object"
+}

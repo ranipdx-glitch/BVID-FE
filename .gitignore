@@ -123,6 +123,9 @@ examples/output/*.png
 examples/output/*.csv
 examples/output/*.json
 
+# Local MkDocs build output (CI rebuilds and deploys to GitHub Pages).
+site/
+
 # ---- Claude Code / superpowers / subagent outputs ----
 docs/superpowers/
 .superpowers/

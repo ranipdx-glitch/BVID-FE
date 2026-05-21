@@ -3,6 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/ranipdx-glitch/BVID-FE/actions/workflows/tests.yml/badge.svg)](https://github.com/ranipdx-glitch/BVID-FE/actions/workflows/tests.yml)
+[![Docs](https://img.shields.io/badge/docs-mkdocs--material-blue)](https://ranipdx-glitch.github.io/BVID-FE/)
+
+> **Documentation:** the full MkDocs site is published at
+> <https://ranipdx-glitch.github.io/BVID-FE/> and includes a Quickstart, the
+> Python API reference, the C-scan JSON schema, the physics models, and the
+> Streamlit deployment guide. Auto-generated JSON Schemas for `AnalysisConfig`
+> and `AnalysisResults` live at
+> [`/schemas/`](https://ranipdx-glitch.github.io/BVID-FE/schemas/analysis_config.json).
 
 A Python library for predicting residual strength and stiffness of fiber-reinforced composite laminates containing Barely Visible Impact Damage (BVID).
 
