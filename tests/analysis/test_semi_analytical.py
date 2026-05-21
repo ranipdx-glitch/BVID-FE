@@ -3,6 +3,7 @@ import math
 import pytest
 
 from bvidfe.analysis.semi_analytical import (
+    SemiAnalyticalResult,
     _sublaminate_D_matrix,
     find_critical_interface,
     semi_analytical_cai,
@@ -81,9 +82,11 @@ def test_semi_analytical_cai_pristine_returns_pristine():
     m = MATERIAL_LIBRARY["IM7/8552"]
     lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
     ds = DamageState([], dent_depth_mm=0.0)
-    sigma_cai, crit_idx, eig = semi_analytical_cai(lam, ds, 500.0, 15000.0)
-    assert sigma_cai == 500.0
-    assert crit_idx is None
+    result = semi_analytical_cai(lam, ds, 500.0, 15000.0)
+    assert isinstance(result, SemiAnalyticalResult)
+    assert result.residual_strength_MPa == 500.0
+    assert result.critical_interface_index is None
+    assert result.critical_buckling_load_N is None
 
 
 def test_semi_analytical_cai_returns_less_than_pristine():
@@ -93,9 +96,12 @@ def test_semi_analytical_cai_returns_less_than_pristine():
         [DelaminationEllipse(3, (0, 0), 30, 20, 0)],
         dent_depth_mm=0.5,
     )
-    sigma_cai, crit_idx, eig = semi_analytical_cai(lam, ds, 500.0, 15000.0)
-    assert 0 < sigma_cai < 500.0
-    assert crit_idx == 3
+    result = semi_analytical_cai(lam, ds, 500.0, 15000.0)
+    assert isinstance(result, SemiAnalyticalResult)
+    assert 0 < result.residual_strength_MPa < 500.0
+    assert result.critical_interface_index == 3
+    assert result.critical_buckling_load_N is not None
+    assert result.critical_buckling_load_N > 0
 
 
 def test_semi_analytical_cai_takes_min_over_soutis_and_buckling():
@@ -107,8 +113,28 @@ def test_semi_analytical_cai_takes_min_over_soutis_and_buckling():
         [DelaminationEllipse(3, (0, 0), 60, 40, 0)],
         dent_depth_mm=0.5,
     )
-    sigma_cai_large, _, _ = semi_analytical_cai(lam, ds_large, 500.0, 15000.0)
-    assert sigma_cai_large > 0
+    result_large = semi_analytical_cai(lam, ds_large, 500.0, 15000.0)
+    assert result_large.residual_strength_MPa > 0
+
+
+def test_semi_analytical_result_is_frozen_dataclass():
+    """``SemiAnalyticalResult`` is an immutable, named-attribute container —
+    callers must not be able to mutate its fields after construction, and
+    the structured access must replace positional-tuple unpacking."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    lam = Laminate(m, [0, 45, -45, 90] * 4, 0.152)
+    ds = DamageState(
+        [DelaminationEllipse(3, (0, 0), 30, 20, 0)],
+        dent_depth_mm=0.5,
+    )
+    result = semi_analytical_cai(lam, ds, 500.0, 15000.0)
+    # Frozen dataclass: assignment to a field raises.
+    with pytest.raises((AttributeError, Exception)):
+        result.residual_strength_MPa = 0.0  # type: ignore[misc]
+    # Named-attribute access (the whole point of this dataclass).
+    assert hasattr(result, "residual_strength_MPa")
+    assert hasattr(result, "critical_interface_index")
+    assert hasattr(result, "critical_buckling_load_N")
 
 
 def test_semi_analytical_tai_pristine_returns_pristine():

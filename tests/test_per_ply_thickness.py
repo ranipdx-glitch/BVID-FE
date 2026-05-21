@@ -232,9 +232,10 @@ def test_sublaminate_selection_uses_thickness_not_ply_count():
         [DelaminationEllipse(1, (0.0, 0.0), 60.0, 40.0, 0.0)],
         dent_depth_mm=0.5,
     )
-    sigma_cai, crit_idx, N_cr = semi_analytical_cai(
-        lam, ds, sigma_pristine_MPa=500.0, A_panel_mm2=15000.0
-    )
+    result = semi_analytical_cai(lam, ds, sigma_pristine_MPa=500.0, A_panel_mm2=15000.0)
+    sigma_cai = result.residual_strength_MPa
+    crit_idx = result.critical_interface_index
+    N_cr = result.critical_buckling_load_N
     assert crit_idx == 1
     # h_sub must equal the lower (thinner) stack's total thickness (0.4 mm),
     # so sigma_buckling = N_cr / 0.4. If the buggy logic picked the upper

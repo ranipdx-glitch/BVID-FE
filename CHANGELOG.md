@@ -6,6 +6,30 @@ All notable changes to BVID-FE are documented in this file.
 
 In-progress work toward v0.2.0. No tag yet.
 
+### Changed
+
+- **`semi_analytical_cai` returns a structured `SemiAnalyticalResult`
+  dataclass instead of a positional `tuple[float, int|None, float|None]`
+  (issue #83).** The previous return shape forced callers to remember the
+  positional convention `(sigma_CAI, critical_interface, N_cr)` and used
+  bare `None` sentinels in two of the three slots, which made the
+  `BvidAnalysis._semi_analytical` call site fragile (a silent swap of two
+  fields would have type-checked but been silently wrong). The new
+  ``SemiAnalyticalResult`` is a frozen dataclass with three named fields —
+  ``residual_strength_MPa: float``, ``critical_interface_index: int |
+  None``, and ``critical_buckling_load_N: float | None`` — so every call
+  site reads named attributes. ``BvidAnalysis._semi_analytical`` (the only
+  internal consumer) is updated; the tension branch wraps its scalar
+  result in the same dataclass so the dispatch shape is uniform across
+  loadings. The dataclass is **not** re-exported at the top-level
+  ``bvidfe`` package — it stays internal to ``bvidfe.analysis`` until a
+  downstream user case justifies promoting it. Since BVID-FE is still on
+  the 0.x series, no compatibility shim is provided; users calling
+  ``semi_analytical_cai`` directly must read named attributes (or
+  reconstruct the previous tuple via
+  ``(r.residual_strength_MPa, r.critical_interface_index,
+  r.critical_buckling_load_N)`` at the call site).
+
 ### Added
 
 - **Per-ply thickness support (issue #5).** ``Laminate.ply_thickness_mm``,
