@@ -20,10 +20,24 @@ Condensation:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from bvidfe.elements.gauss import gauss_points_hex
 from bvidfe.elements.hex8 import Hex8Element, _validate_jacobian
+
+# Opt-in strict mode: when True, a singular Kaa during static condensation
+# raises LinAlgError instead of silently falling back to the un-condensed Kuu.
+# Default (False) preserves historical behavior; tests / callers may flip this
+# to fail fast when investigating mesh-quality issues.
+STRICT_HEX8I_CONDENSATION: bool = False
+
+_logger = logging.getLogger("bvidfe.elements")
+
+# Dedup key set so a large mesh doesn't spam the same warning per element.
+# Keys are (ply_angle_deg_rounded, cond_kaa_rounded).
+_warned_elements: set[tuple[float, float]] = set()
 
 
 class Hex8iElement(Hex8Element):
@@ -89,7 +103,45 @@ class Hex8iElement(Hex8Element):
         # Static condensation
         try:
             Kaa_inv = np.linalg.inv(Kaa)
-        except np.linalg.LinAlgError:
+        except np.linalg.LinAlgError as exc:
+            # Diagnostic: compute condition number of Kaa for the log/exception.
+            try:
+                cond_kaa = float(np.linalg.cond(Kaa))
+                if not np.isfinite(cond_kaa):
+                    cond_kaa = float("inf")
+            except (np.linalg.LinAlgError, ValueError):
+                cond_kaa = float("inf")
+
+            ply_angle = getattr(self, "ply_angle_deg", None)
+            elem_id = getattr(self, "element_id", None)
+            elem_label = (
+                f"hex8i element id={elem_id}" if elem_id is not None else "an hex8i element"
+            )
+
+            if STRICT_HEX8I_CONDENSATION:
+                raise np.linalg.LinAlgError(
+                    f"Singular Kaa during Hex8i static condensation "
+                    f"({elem_label}, ply_angle={ply_angle}, "
+                    f"cond(Kaa)={cond_kaa:.3e}); enrichment cannot be applied."
+                ) from exc
+
+            # Dedup so a 100k-element mesh doesn't emit 100k identical warnings.
+            ply_key = round(float(ply_angle), 3) if ply_angle is not None else float("nan")
+            if np.isfinite(cond_kaa):
+                cond_key = round(cond_kaa, -int(np.floor(np.log10(max(cond_kaa, 1.0)))))
+            else:
+                cond_key = float("inf")
+            dedup_key = (ply_key, cond_key)
+            if dedup_key not in _warned_elements:
+                _warned_elements.add(dedup_key)
+                _logger.warning(
+                    "Hex8i static condensation: Kaa is singular for %s "
+                    "(ply_angle=%s, cond(Kaa)=%.3e). Enrichment disabled for "
+                    "this element; check mesh quality if FE3D results are noisy.",
+                    elem_label,
+                    ply_angle,
+                    cond_kaa,
+                )
             return Kuu
         K = Kuu - Kua @ Kaa_inv @ Kua.T
         # Enforce exact symmetry
