@@ -43,6 +43,13 @@ class DelaminationEllipse:
     def area_mm2(self) -> float:
         return math.pi * self.major_mm * self.minor_mm
 
+    def __repr__(self) -> str:
+        return (
+            f"DelaminationEllipse(iface={self.interface_index}, "
+            f"a={self.major_mm:.2g}mm, b={self.minor_mm:.2g}mm, "
+            f"theta={self.orientation_deg:.0f}deg)"
+        )
+
 
 @dataclass
 class DamageState:
@@ -67,3 +74,10 @@ class DamageState:
         for e in self.delaminations:
             out[e.interface_index] = out.get(e.interface_index, 0.0) + e.area_mm2
         return out
+
+    def __repr__(self) -> str:
+        return (
+            f"DamageState(n_delam={len(self.delaminations)}, "
+            f"dent={self.dent_depth_mm:.3g}mm, "
+            f"fbr={self.fiber_break_radius_mm:.3g}mm)"
+        )

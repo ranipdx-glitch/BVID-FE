@@ -117,6 +117,16 @@ class AnalysisResults:
     #: structured tags for them are future work.
     warnings: List[str] = field(default_factory=list)
 
+    def __repr__(self) -> str:
+        return (
+            f"AnalysisResults(tier={self.tier_used!r}, "
+            f"kd={self.knockdown:.3f}, "
+            f"sigma={self.residual_strength_MPa:.1f}/"
+            f"{self.pristine_strength_MPa:.1f}MPa, "
+            f"dpa={self.dpa_mm2:.1f}mm2, "
+            f"notes={len(self.notes)}, warnings={len(self.warnings)})"
+        )
+
     def summary(self) -> str:
         lines = [
             "BVID Analysis Results",
