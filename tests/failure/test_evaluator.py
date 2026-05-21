@@ -40,6 +40,40 @@ def test_evaluator_unknown_criterion_raises():
         FailureEvaluator(m, criterion="bogus")
 
 
+def test_criterion_registry_contains_known_keys():
+    """The registry is the single source of truth for available criteria;
+    asserting its keys here pins the supported set so any future addition
+    has to update this test deliberately."""
+    from bvidfe.failure.evaluator import _CRITERION_REGISTRY
+
+    assert set(_CRITERION_REGISTRY.keys()) == {"tsai_wu", "larc05"}
+
+
+def test_evaluator_unknown_criterion_error_lists_valid_names():
+    """The ValueError raised on bad input must name every valid criterion
+    so users get an actionable message instead of a bare 'unknown
+    criterion' string."""
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    with pytest.raises(ValueError) as excinfo:
+        FailureEvaluator(m, criterion="bogus")
+    msg = str(excinfo.value)
+    assert "tsai_wu" in msg
+    assert "larc05" in msg
+
+
+def test_evaluator_caches_function_pointer():
+    """``__init__`` must store the dispatch function on ``self`` so
+    ``evaluate`` no longer branches on raw strings."""
+    from bvidfe.failure.larc05 import larc05_index_batch
+    from bvidfe.failure.tsai_wu import tsai_wu_index_batch
+
+    m = MATERIAL_LIBRARY["IM7/8552"]
+    ev_tw = FailureEvaluator(m, criterion="tsai_wu")
+    ev_lc = FailureEvaluator(m, criterion="larc05")
+    assert ev_tw._evaluate_fn is tsai_wu_index_batch
+    assert ev_lc._evaluate_fn is larc05_index_batch
+
+
 def test_evaluate_matches_scalar_loop():
     """Lock the vectorised FailureEvaluator.evaluate against the prior
     nested-Python-loop form on a random (3, 4, 6) stress field. Tsai-Wu
