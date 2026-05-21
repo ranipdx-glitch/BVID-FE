@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from dataclasses import dataclass
 from typing import Optional, Sequence, Union
 
 import numpy as np
@@ -30,6 +31,33 @@ from bvidfe.failure.soutis_openhole import (
     soutis_cai,
     whitney_nuismer_tai,
 )
+
+
+@dataclass(frozen=True)
+class SemiAnalyticalResult:
+    """Structured result of :func:`semi_analytical_cai`.
+
+    Attributes
+    ----------
+    residual_strength_MPa : float
+        Compression-after-impact residual strength in MPa. The minimum of
+        the Soutis empirical knockdown and the sublaminate buckling stress
+        when damage is present; equal to the pristine strength when the
+        damage state is empty.
+    critical_interface_index : int | None
+        Index of the interface that scored highest in
+        :func:`find_critical_interface`. ``None`` when the damage state
+        contains no delaminations.
+    critical_buckling_load_N : float | None
+        Sublaminate buckling force per unit width (N/mm) at the critical
+        interface. ``None`` when there is no damage or when the buckling
+        sublaminate is degenerate (zero plies).
+    """
+
+    residual_strength_MPa: float
+    critical_interface_index: int | None = None
+    critical_buckling_load_N: float | None = None
+
 
 # Sublaminate buckling coefficient multiplier on the SSSS Rayleigh-Ritz result
 # for other panel boundary conditions. The delaminated sublaminate's edge
@@ -261,7 +289,7 @@ def semi_analytical_cai(
     sigma_pristine_MPa: float,
     A_panel_mm2: float,
     boundary: str = "simply_supported",
-) -> tuple[float, Optional[int], Optional[float]]:
+) -> SemiAnalyticalResult:
     """Semi-analytical compression-after-impact residual strength (MPa).
 
     Takes the minimum of:
@@ -275,11 +303,20 @@ def semi_analytical_cai(
     ``knockdown`` (as computed downstream by ``BvidAnalysis.run()``) is
     guaranteed to be less-than-or-equal to the ``empirical`` tier's.
 
-    Returns (sigma_CAI_MPa, critical_interface_index, critical_buckling_eigenvalue).
-    If the damage state is empty, returns (sigma_pristine, None, None).
+    Returns
+    -------
+    SemiAnalyticalResult
+        Structured result with ``residual_strength_MPa``,
+        ``critical_interface_index``, and ``critical_buckling_load_N``.
+        If the damage state is empty, ``residual_strength_MPa`` equals
+        ``sigma_pristine_MPa`` and the two interface fields are ``None``.
     """
     if not damage.delaminations:
-        return sigma_pristine_MPa, None, None
+        return SemiAnalyticalResult(
+            residual_strength_MPa=sigma_pristine_MPa,
+            critical_interface_index=None,
+            critical_buckling_load_N=None,
+        )
 
     # Soutis bound
     dpa = damage.projected_damage_area_mm2
@@ -288,7 +325,11 @@ def semi_analytical_cai(
     # Sublaminate buckling bound
     crit_idx = find_critical_interface(damage, lam)
     if crit_idx is None:
-        return sigma_soutis, None, None
+        return SemiAnalyticalResult(
+            residual_strength_MPa=sigma_soutis,
+            critical_interface_index=None,
+            critical_buckling_load_N=None,
+        )
 
     # Largest ellipse at that interface drives buckling
     ellipses_at_crit = [e for e in damage.delaminations if e.interface_index == crit_idx]
@@ -307,12 +348,20 @@ def semi_analytical_cai(
     lower_t_total = sum(lower_t)
     sub_t = upper_t if upper_t_total <= lower_t_total else lower_t
     if len(sub_t) == 0:
-        return sigma_soutis, crit_idx, None
+        return SemiAnalyticalResult(
+            residual_strength_MPa=sigma_soutis,
+            critical_interface_index=crit_idx,
+            critical_buckling_load_N=None,
+        )
     h_sub = float(sum(sub_t))
     sigma_buckling = N_cr_per_mm / h_sub if h_sub > 0 else float("inf")
 
     sigma_cai = min(sigma_soutis, sigma_buckling)
-    return sigma_cai, crit_idx, N_cr_per_mm
+    return SemiAnalyticalResult(
+        residual_strength_MPa=sigma_cai,
+        critical_interface_index=crit_idx,
+        critical_buckling_load_N=N_cr_per_mm,
+    )
 
 
 def semi_analytical_tai(

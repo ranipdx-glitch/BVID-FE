@@ -15,6 +15,7 @@ from bvidfe.analysis.fe_tier import (
     fe3d_tai,
 )
 from bvidfe.analysis.semi_analytical import (
+    SemiAnalyticalResult,
     semi_analytical_cai,
     semi_analytical_tai,
 )
@@ -90,7 +91,10 @@ class BvidAnalysis:
             critical_interface = None
             field_results = None
         elif self.config.tier == "semi_analytical":
-            sigma, critical_interface, N_cr = self._semi_analytical(lam, damage, sigma_0)
+            sa_result = self._semi_analytical(lam, damage, sigma_0)
+            sigma = sa_result.residual_strength_MPa
+            critical_interface = sa_result.critical_interface_index
+            N_cr = sa_result.critical_buckling_load_N
             buckling_eigs = [N_cr] if N_cr is not None else None
             field_results = None
         elif self.config.tier == "fe3d":
@@ -154,7 +158,9 @@ class BvidAnalysis:
         assert self.config.impact is not None  # asserted in __post_init__
         return impact_to_damage(self.config.impact, lam, self.config.panel)
 
-    def _semi_analytical(self, lam: Laminate, damage: DamageState, sigma_0: float):
+    def _semi_analytical(
+        self, lam: Laminate, damage: DamageState, sigma_0: float
+    ) -> SemiAnalyticalResult:
         A_panel = self.config.panel.Lx_mm * self.config.panel.Ly_mm
         if self.config.loading == "compression":
             return semi_analytical_cai(
@@ -164,9 +170,14 @@ class BvidAnalysis:
                 A_panel,
                 boundary=self.config.panel.boundary,
             )
-        # tension
+        # tension: no sublaminate buckling channel — wrap the scalar result
+        # so callers consume a uniform ``SemiAnalyticalResult`` shape.
         sigma = semi_analytical_tai(lam, damage, sigma_0)
-        return sigma, None, None
+        return SemiAnalyticalResult(
+            residual_strength_MPa=sigma,
+            critical_interface_index=None,
+            critical_buckling_load_N=None,
+        )
 
     def _empirical(self, lam: Laminate, damage: DamageState, sigma_0: float) -> float:
         A_panel = self.config.panel.Lx_mm * self.config.panel.Ly_mm
