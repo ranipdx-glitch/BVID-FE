@@ -29,7 +29,7 @@ LoadingMode = Literal["compression", "tension"]
 #: Failure-criterion name. ``failure/evaluator.py`` currently defines its own
 #: ``CriterionName`` alias; this duplicate exists so future callers can import
 #: from a single place once the evaluator is migrated in a follow-up PR.
-CriterionName = Literal["tsai_wu", "larc05"]
+CriterionName = Literal["tsai_wu", "larc05", "puck"]
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ CriterionName = Literal["tsai_wu", "larc05"]
 
 _TIER_NAMES: frozenset[str] = frozenset({"empirical", "semi_analytical", "fe3d"})
 _LOADING_MODES: frozenset[str] = frozenset({"compression", "tension"})
-_CRITERION_NAMES: frozenset[str] = frozenset({"tsai_wu", "larc05"})
+_CRITERION_NAMES: frozenset[str] = frozenset({"tsai_wu", "larc05", "puck"})
 
 
 __all__ = [

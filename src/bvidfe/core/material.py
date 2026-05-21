@@ -56,6 +56,12 @@ class OrthotropicMaterial:
     Zt: Optional[float] = None
     Zc: Optional[float] = None
     S13: Optional[float] = None
+    # Puck (1998) action-plane inclination parameters. Tension (``puck_p_nt_plus``)
+    # and compression (``puck_p_nt_minus``) slopes of the master fracture
+    # envelope at sigma_n = 0; conservative CFRP/epoxy defaults from
+    # Puck-Schürmann 1998 (Composites Sci. Tech. 58, 1045-1067).
+    puck_p_nt_plus: float = 0.30
+    puck_p_nt_minus: float = 0.25
 
     def __post_init__(self) -> None:
         positive_fields = (
@@ -82,6 +88,10 @@ class OrthotropicMaterial:
             v = getattr(self, k)
             if v is not None and v <= 0:
                 raise ValueError(f"{k} must be > 0 if provided (got {v})")
+        for k in ("puck_p_nt_plus", "puck_p_nt_minus"):
+            v = getattr(self, k)
+            if v < 0:
+                raise ValueError(f"{k} must be >= 0 (got {v})")
         if not -1.0 < self.nu12 < 0.5:
             raise ValueError(f"nu12 out of physical range (got {self.nu12})")
         # rho is kg/mm^3; realistic engineering materials span ~[1e-7, 1e-5]
