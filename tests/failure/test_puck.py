@@ -21,7 +21,6 @@ from bvidfe.failure.evaluator import (
 )
 from bvidfe.failure.puck import puck_index, puck_index_batch
 
-
 # ---------------------------------------------------------------------------
 # Registry wiring
 # ---------------------------------------------------------------------------
