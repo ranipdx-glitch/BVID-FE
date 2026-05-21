@@ -9,9 +9,10 @@ import numpy as np
 
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
+from bvidfe.failure.puck import puck_index, puck_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 
-CriterionName = Literal["tsai_wu", "larc05"]
+CriterionName = Literal["tsai_wu", "larc05", "puck"]
 
 # Registry mapping criterion name → batch index function. New criteria are
 # added by extending this dict (and the ``CriterionName`` Literal) rather
@@ -21,6 +22,7 @@ _CRITERION_REGISTRY: dict[
 ] = {
     "tsai_wu": tsai_wu_index_batch,
     "larc05": larc05_index_batch,
+    "puck": puck_index_batch,
 }
 
 # Scalar variants used by ``FailureEvaluator._index`` (per-point evaluation).
@@ -30,6 +32,7 @@ _CRITERION_SCALAR_REGISTRY: dict[
 ] = {
     "tsai_wu": tsai_wu_index,
     "larc05": larc05_index,
+    "puck": puck_index,
 }
 
 

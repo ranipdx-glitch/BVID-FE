@@ -46,7 +46,7 @@ def test_criterion_registry_contains_known_keys():
     has to update this test deliberately."""
     from bvidfe.failure.evaluator import _CRITERION_REGISTRY
 
-    assert set(_CRITERION_REGISTRY.keys()) == {"tsai_wu", "larc05"}
+    assert set(_CRITERION_REGISTRY.keys()) == {"tsai_wu", "larc05", "puck"}
 
 
 def test_evaluator_unknown_criterion_error_lists_valid_names():
