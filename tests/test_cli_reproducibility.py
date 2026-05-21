@@ -45,7 +45,6 @@ from typing import Any
 
 import pytest
 
-
 # Each entry: (id, CLI args, expected JSON snapshot fields).
 # Snapshots captured 2026-05-20 against bvidfe 0.2.0.dev0 with
 # numpy 2.x and scipy 1.14.x on linux x86_64.
