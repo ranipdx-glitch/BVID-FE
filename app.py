@@ -17,6 +17,7 @@ import io
 import json
 import math
 import sys
+import time
 import warnings
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -1096,8 +1097,25 @@ if run_clicked:
                 st.stop()
         with st.spinner("Running BVID analysis…"):
             try:
+                # Time the cached call so we can surface cache-hit vs
+                # cache-miss as a subtle toast (#112). ``st.cache_data``
+                # returns its memoised payload without entering the wrapped
+                # function, so anything < ~50 ms is a hit in practice
+                # (a real BvidAnalysis solve is at least sub-second on the
+                # empirical tier and seconds-to-minutes on fe3d).
+                _t0 = time.perf_counter()
                 payload = _run_analysis_cached(config_dict)
+                _dt = time.perf_counter() - _t0
                 st.session_state["last_result"] = payload
+                try:
+                    if _dt < 0.05:
+                        st.toast("Cache hit — instant", icon="⚡")
+                    else:
+                        st.toast(f"Solved in {_dt:.1f}s", icon="✓")
+                except Exception:
+                    # ``st.toast`` is fairly new; never let UX sugar
+                    # block a successful analysis from rendering.
+                    pass
             except Exception as exc:
                 st.session_state["last_result"] = None
                 st.error(f"Analysis failed: {exc}")
@@ -1358,23 +1376,59 @@ with tabs[6]:
                         )
                         energies = []
             if energies:
+                # Live per-point progress (#112). The bar is wired into a
+                # callback passed to ``sweep_energies`` so each iteration
+                # updates the UI as it lands; ``progress_callback`` is
+                # ignored by ``st.cache_data``-style memoisation so we call
+                # the sweep entrypoint directly here. A buggy callback
+                # cannot abort the sweep itself — the library catches it.
+                prog = st.progress(0.0, text=f"0/{len(energies)} starting…")
+
+                def _on_point(i: int, total: int, inputs: dict) -> None:
+                    e_val = inputs.get("energy_J", "?")
+                    e_txt = f"{e_val:g}" if isinstance(e_val, (int, float)) else str(e_val)
+                    prog.progress(i / total, text=f"{i}/{total}: E={e_txt} J")
+
                 try:
                     with st.spinner(f"Running {len(energies)}-point {sweep_tier} sweep…"):
-                        df = _sweep_cached(config_dict, sweep_tier, tuple(energies))
+                        cfg_sweep = replace(_config_from_dict(config_dict), tier=sweep_tier)
+                        df = sweep_energies(
+                            cfg_sweep,
+                            list(energies),
+                            on_error="warn",
+                            progress_callback=_on_point,
+                        )
                 except Exception as exc:
                     st.error(f"Sweep failed: {exc}")
                 else:
+                    prog.empty()
+                    # Failed-point summary (#112). The fixed-schema sweep
+                    # DataFrame (#38) always carries an ``error`` column;
+                    # surface failed rows in a small table above the success
+                    # plot so the user sees which points to investigate.
+                    if "error" in df.columns:
+                        failed_df = df[df["error"].notna() & (df["error"] != "")]
+                    else:  # defensive — schema is fixed by parametric_sweep
+                        failed_df = df.loc[df["knockdown"].isna()]
                     if df["knockdown"].isna().all():
                         st.error(
                             "Every sweep point failed — check the sidebar "
                             "configuration and the energy values."
                         )
+                        if not failed_df.empty:
+                            st.dataframe(
+                                failed_df[["energy_J", "error"]],
+                                use_container_width=True,
+                            )
                     else:
-                        failed = df.loc[df["knockdown"].isna(), "energy_J"].tolist()
-                        if failed:
-                            st.warning(
-                                "Some sweep points failed and are blank: "
-                                + ", ".join(f"{e:g} J" for e in failed)
+                        if not failed_df.empty:
+                            st.warning(f"⚠ {len(failed_df)} point(s) failed:")
+                            cols_to_show = [
+                                c for c in ("energy_J", "error") if c in failed_df.columns
+                            ]
+                            st.dataframe(
+                                failed_df[cols_to_show],
+                                use_container_width=True,
                             )
                         _show_df(df)
                         ok = df.dropna(subset=["knockdown"])
