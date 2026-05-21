@@ -26,9 +26,10 @@ TierName = Literal["empirical", "semi_analytical", "fe3d"]
 #: In-plane loading mode selected on ``AnalysisConfig.loading``.
 LoadingMode = Literal["compression", "tension"]
 
-#: Failure-criterion name. ``failure/evaluator.py`` currently defines its own
-#: ``CriterionName`` alias; this duplicate exists so future callers can import
-#: from a single place once the evaluator is migrated in a follow-up PR.
+#: Failure-criterion name. Canonical source for the alias; ``failure/evaluator.py``
+#: and ``analysis/fe_tier.py`` import it from here. Extend this Literal (and the
+#: ``_CRITERION_NAMES`` validation set below) in lockstep with the registry in
+#: :mod:`bvidfe.failure.evaluator` when adding a new criterion.
 CriterionName = Literal["tsai_wu", "larc05", "puck"]
 
 

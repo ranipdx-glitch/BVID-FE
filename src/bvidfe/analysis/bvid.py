@@ -7,13 +7,14 @@ from copy import deepcopy
 from dataclasses import asdict
 from typing import Union
 
+from bvidfe._types import LoadingMode
 from bvidfe.analysis.config import AnalysisConfig
-from bvidfe.analysis.results import AnalysisResults
 from bvidfe.analysis.fe_tier import (
     _fe3d_cai_first_ply_failure,
     fe3d_cai_buckling,
     fe3d_tai,
 )
+from bvidfe.analysis.results import AnalysisResults
 from bvidfe.analysis.semi_analytical import (
     SemiAnalyticalResult,
     semi_analytical_cai,
@@ -36,7 +37,7 @@ def _resolve_material(m: Union[str, OrthotropicMaterial]) -> OrthotropicMaterial
     return m
 
 
-def _pristine_strength(lam: Laminate, loading: str) -> float:
+def _pristine_strength(lam: Laminate, loading: LoadingMode) -> float:
     """Thickness-weighted ply-average pristine strength in the loading direction.
 
     For compression: sum_i t_i * (Xc*cos^2 + Yc*sin^2) / sum_i t_i

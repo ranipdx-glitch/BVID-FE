@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable
 
 import numpy as np
 
+from bvidfe._types import CriterionName
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.puck import puck_index, puck_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 
-CriterionName = Literal["tsai_wu", "larc05", "puck"]
-
 # Registry mapping criterion name → batch index function. New criteria are
-# added by extending this dict (and the ``CriterionName`` Literal) rather
-# than by adding another string-comparison branch in the evaluator.
+# added by extending this dict (and the ``CriterionName`` Literal in
+# :mod:`bvidfe._types`) rather than by adding another string-comparison
+# branch in the evaluator.
 _CRITERION_REGISTRY: dict[
     CriterionName, Callable[[OrthotropicMaterial, np.ndarray], np.ndarray]
 ] = {
