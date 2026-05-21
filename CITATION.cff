@@ -4,7 +4,7 @@ type: software
 title: "BVID-FE: Barely Visible Impact Damage residual-strength analysis for composite laminates"
 version: 0.1.0
 date-released: 2026-04-17
-url: "https://github.com/elhajjar1/BVID-FE"
+url: "https://ranipdx-glitch.github.io/BVID-FE/"
 repository-code: "https://github.com/elhajjar1/BVID-FE"
 license: MIT
 authors:

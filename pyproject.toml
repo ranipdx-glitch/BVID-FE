@@ -22,9 +22,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7,<9", "pytest-cov>=4,<7", "ruff>=0.5,<1", "black>=24,<26", "pre-commit>=3,<5"]
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10"]
 
 [project.urls]
 Homepage = "https://github.com/ranipdx-glitch/BVID-FE"
+Documentation = "https://ranipdx-glitch.github.io/BVID-FE/"
 Repository = "https://github.com/ranipdx-glitch/BVID-FE"
 Issues = "https://github.com/ranipdx-glitch/BVID-FE/issues"
 Changelog = "https://github.com/ranipdx-glitch/BVID-FE/blob/main/CHANGELOG.md"

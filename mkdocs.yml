@@ -1,0 +1,78 @@
+site_name: BVID-FE
+site_description: Barely Visible Impact Damage residual-strength analysis for composite laminates
+site_url: https://ranipdx-glitch.github.io/BVID-FE/
+repo_url: https://github.com/ranipdx-glitch/BVID-FE
+repo_name: ranipdx-glitch/BVID-FE
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+# Files inside docs/ that are internal/dev-only and should NOT ship with the
+# published site. Listed explicitly so mkdocs --strict stays quiet about
+# "pages exist in the docs directory but are not in the nav".
+exclude_docs: |
+  BUILD.md
+  superpowers/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Python API: python_api.md
+  - C-Scan Schema: cscan_schema.md
+  - Physics Models: physics_models.md
+  - Deployment: deployment.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+plugins:
+  - search
