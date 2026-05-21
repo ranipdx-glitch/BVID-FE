@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Sequence, Union
+from typing import Iterable, List, Optional, Sequence, Union
 
+from bvidfe._types import _LOADING_MODES, _TIER_NAMES, LoadingMode, TierName
 from bvidfe.core.geometry import PanelGeometry
 from bvidfe.core.material import OrthotropicMaterial
 from bvidfe.damage.state import DamageState
 from bvidfe.impact.mapping import ImpactEvent
+
+
+def _validate_choice(value: object, allowed: Iterable[str], field: str) -> None:
+    """Raise ``ValueError`` if *value* is not a member of *allowed*.
+
+    The error message lists the allowed values (sorted for deterministic
+    output) and the offending value, prefixed with the *field* name, e.g.
+    ``'tier must be one of [...]; got "fe3D"'``.
+    """
+    allowed_sorted = sorted(allowed)
+    if value not in allowed_sorted:
+        raise ValueError(f"{field} must be one of {allowed_sorted}; got {value!r}")
 
 
 @dataclass
@@ -75,13 +88,15 @@ class AnalysisConfig:
     layup_deg: List[float]
     ply_thickness_mm: Union[float, Sequence[float]]
     panel: PanelGeometry
-    loading: Literal["compression", "tension"] = "compression"
-    tier: Literal["empirical", "semi_analytical", "fe3d"] = "empirical"
+    loading: LoadingMode = "compression"
+    tier: TierName = "empirical"
     impact: Optional[ImpactEvent] = None
     damage: Optional[DamageState] = None
     mesh: Optional[MeshParams] = None
 
     def __post_init__(self) -> None:
+        _validate_choice(self.tier, _TIER_NAMES, "tier")
+        _validate_choice(self.loading, _LOADING_MODES, "loading")
         if (self.impact is None) == (self.damage is None):
             raise ValueError(
                 "Provide exactly one of AnalysisConfig.impact or AnalysisConfig.damage"
