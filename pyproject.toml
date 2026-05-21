@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7,<9", "pytest-cov>=4,<7", "ruff>=0.5,<1", "black>=24,<26", "pre-commit>=3,<5"]
+dev = ["pytest>=7,<9", "pytest-cov>=4,<7", "ruff>=0.5,<1", "black>=24,<27", "pre-commit>=3,<5"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10"]
 
 [project.urls]
