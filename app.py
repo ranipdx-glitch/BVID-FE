@@ -122,6 +122,189 @@ _DF_FORMATS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Presets and shareable URL state
+# ---------------------------------------------------------------------------
+#
+# Presets are canonical sidebar configurations. Picking a preset writes its
+# values into ``st.session_state`` BEFORE the widgets render (so the widgets
+# pick them up via their ``key=`` arg). A "preset-applied" guard
+# (``_last_preset_key``) prevents a re-applied preset from clobbering user
+# edits on every rerun — only a *change* in preset selection triggers a
+# rewrite of the controlled keys.
+#
+# URL state uses short keys (``mat``, ``lay``, ``lx``, ``ly``, ``E``, ``d``,
+# ``t``, ``ld``) so a shared link stays well under the 2 kB safe ceiling for
+# common browsers. On app load, if the URL carries known keys, we hydrate
+# session state from them BEFORE widgets render (same mechanism as presets).
+
+PRESET_CUSTOM = "Custom"
+PRESETS: dict[str, dict] = {
+    PRESET_CUSTOM: {},  # sentinel — no overrides
+    "Empirical quick (IM7/8552 quasi-iso, 20 J)": {
+        "material_choice": "IM7/8552",
+        "layup_text": "0, 45, -45, 90, 90, -45, 45, 0",
+        "Lx_mm": 150.0,
+        "Ly_mm": 100.0,
+        "energy_J": 20.0,
+        "diameter_mm": 16.0,
+        "tier": "empirical",
+        "loading": "compression",
+        "input_mode": "Impact event",
+    },
+    "Semi-analytical buckling (IM7/8552 quasi-iso, 10 J)": {
+        "material_choice": "IM7/8552",
+        "layup_text": "0, 45, -45, 90, 90, -45, 45, 0",
+        "Lx_mm": 150.0,
+        "Ly_mm": 100.0,
+        "energy_J": 10.0,
+        "diameter_mm": 16.0,
+        "tier": "semi_analytical",
+        "loading": "compression",
+        "input_mode": "Impact event",
+    },
+    "FE3D detailed (T800/epoxy, 15 J, coarse mesh)": {
+        "material_choice": "T800/epoxy",
+        "layup_text": "0, 45, -45, 90, 90, -45, 45, 0",
+        "Lx_mm": 150.0,
+        "Ly_mm": 100.0,
+        "energy_J": 15.0,
+        "diameter_mm": 16.0,
+        "tier": "fe3d",
+        "loading": "compression",
+        "input_mode": "Impact event",
+    },
+}
+
+PRESET_NAMES: list[str] = list(PRESETS.keys())
+
+# Widget keys we control via preset / URL hydration. Each maps a sidebar
+# widget's ``key`` argument to the type its widget expects in session_state.
+_URL_TO_STATE: dict[str, tuple[str, type]] = {
+    "mat": ("material_choice", str),
+    "lay": ("layup_text", str),
+    "lx": ("Lx_mm", float),
+    "ly": ("Ly_mm", float),
+    "E": ("energy_J", float),
+    "d": ("diameter_mm", float),
+    "t": ("tier", str),
+    "ld": ("loading", str),
+}
+
+
+def _coerce_layup_url(text: str) -> str:
+    """Sanity-check a URL-supplied layup string before pushing into a widget.
+
+    Falls back to the default if the string parses to nothing valid; the
+    widget itself will surface a friendly error on bad user-edited text but
+    we don't want a malformed URL to crash before widgets even render.
+    """
+    try:
+        angles = _parse_layup(text)
+    except ValueError:
+        return text  # let the widget echo the original; user can fix it
+    if not angles:
+        return text
+    return ", ".join(f"{a:g}" for a in angles)
+
+
+def _apply_state_overrides(overrides: dict) -> None:
+    """Write controlled overrides into ``st.session_state`` with type coercion.
+
+    Skips unknown keys and bad casts silently — the URL/preset path must be
+    permissive so a stale shared link still loads the app.
+    """
+    type_map = {state_key: cast for (_, (state_key, cast)) in _URL_TO_STATE.items()}
+    # widgets controlled only by presets (no URL key) — keep validation here.
+    extra_types = {"input_mode": str}
+    for key, value in overrides.items():
+        cast = type_map.get(key, extra_types.get(key))
+        if cast is None:
+            continue
+        try:
+            coerced = cast(value)
+        except (TypeError, ValueError):
+            continue
+        if key == "layup_text":
+            coerced = _coerce_layup_url(str(coerced))
+        if key == "material_choice" and coerced not in MATERIAL_NAMES:
+            continue
+        if key == "tier" and coerced not in TIERS:
+            continue
+        if key == "loading" and coerced not in ("compression", "tension"):
+            continue
+        if key == "input_mode" and coerced not in ("Impact event", "C-scan inspection"):
+            continue
+        st.session_state[key] = coerced
+
+
+def _hydrate_from_url() -> None:
+    """Populate session state from ``st.query_params`` on first script run.
+
+    Only runs once per session (guarded by ``_url_hydrated``) so user edits
+    after load are not overwritten by the original URL on every rerun.
+    """
+    if st.session_state.get("_url_hydrated"):
+        return
+    st.session_state["_url_hydrated"] = True
+    qp = st.query_params
+    overrides: dict = {}
+    for url_key, (state_key, _cast) in _URL_TO_STATE.items():
+        if url_key in qp:
+            overrides[state_key] = qp[url_key]
+    if overrides:
+        _apply_state_overrides(overrides)
+
+
+def _hydrate_from_preset() -> None:
+    """Apply preset overrides when the user picks a non-Custom preset.
+
+    Only fires when the selection *changes* (tracked in ``_last_preset_key``);
+    re-runs with the same selection are no-ops, so user edits after applying
+    a preset survive subsequent script reruns.
+    """
+    chosen = st.session_state.get("preset_choice", PRESET_CUSTOM)
+    last = st.session_state.get("_last_preset_key")
+    if chosen == last:
+        return
+    st.session_state["_last_preset_key"] = chosen
+    if chosen == PRESET_CUSTOM:
+        return
+    _apply_state_overrides(PRESETS[chosen])
+
+
+def _sync_query_params() -> None:
+    """Write the live sidebar config back to ``st.query_params``.
+
+    Only the minimal-shareable subset (material, layup, panel, impact
+    energy, impactor diameter, tier, loading) is encoded — short keys keep
+    URLs under the ~2 kB safe ceiling. Values are stringified; Streamlit
+    handles URL escaping for us.
+    """
+    try:
+        new_qp = {
+            "mat": str(st.session_state.get("material_choice", DEFAULT_MATERIAL)),
+            "lay": str(st.session_state.get("layup_text", "")),
+            "lx": f"{float(st.session_state.get('Lx_mm', 150.0)):g}",
+            "ly": f"{float(st.session_state.get('Ly_mm', 100.0)):g}",
+            "E": f"{float(st.session_state.get('energy_J', 30.0)):g}",
+            "d": f"{float(st.session_state.get('diameter_mm', 16.0)):g}",
+            "t": str(st.session_state.get("tier", "empirical")),
+            "ld": str(st.session_state.get("loading", "compression")),
+        }
+    except (TypeError, ValueError):
+        return
+    # Only write if the dict actually changes — avoids needless reruns.
+    current = {k: st.query_params.get(k) for k in new_qp}
+    if current != new_qp:
+        try:
+            st.query_params.from_dict(new_qp)
+        except Exception:
+            # Streamlit's query-param API is occasionally fussy on stale
+            # sessions; never let URL syncing crash the app.
+            pass
+
+
 def _show_df(df: pd.DataFrame) -> None:
     """Render a results DataFrame with sane float formatting."""
     fmt = {c: f for c, f in _DF_FORMATS.items() if c in df.columns}
@@ -534,7 +717,31 @@ def _build_ncr(form: dict, cfg, result_dict: dict | None, rec: dict | None) -> t
 # Sidebar — AnalysisConfig builder
 # ---------------------------------------------------------------------------
 
+# Hydrate session_state from URL on first run, then from preset whenever the
+# preset selection changes. Both must run BEFORE the widgets render so the
+# widgets pick up the new values via their ``key=`` arg.
+_hydrate_from_url()
+_hydrate_from_preset()
+
 with st.sidebar:
+    st.markdown("**Configuration preset**")
+    st.selectbox(
+        "Preset",
+        PRESET_NAMES,
+        index=(
+            PRESET_NAMES.index(st.session_state.get("preset_choice", PRESET_CUSTOM))
+            if st.session_state.get("preset_choice", PRESET_CUSTOM) in PRESET_NAMES
+            else 0
+        ),
+        key="preset_choice",
+        help=(
+            "Pick a canonical configuration to populate the sidebar. "
+            "Choose **Custom** to keep your current settings. Selecting a "
+            "preset overwrites the affected widgets; subsequent edits stick."
+        ),
+        on_change=_hydrate_from_preset,
+    )
+
     expert_mode = st.toggle(
         "Expert mode",
         value=False,
@@ -547,10 +754,12 @@ with st.sidebar:
     )
 
     st.markdown("**Material & layup**")
+    if "material_choice" not in st.session_state:
+        st.session_state["material_choice"] = DEFAULT_MATERIAL
     material_choice = st.selectbox(
         "Material",
         MATERIAL_NAMES,
-        index=MATERIAL_NAMES.index(DEFAULT_MATERIAL),
+        key="material_choice",
         help="Built-in carbon/epoxy preset from the BVID-FE material library.",
     )
 
@@ -567,9 +776,11 @@ with st.sidebar:
     else:
         ply_thickness_mm = 0.152
 
+    if "layup_text" not in st.session_state:
+        st.session_state["layup_text"] = "0, 45, -45, 90, 90, -45, 45, 0"
     layup_text = st.text_area(
         "Layup [deg]",
-        value="0, 45, -45, 90, 90, -45, 45, 0",
+        key="layup_text",
         height=80,
         help="Comma-separated ply angles in degrees, mid-plane to outer surface.",
     )
@@ -582,9 +793,13 @@ with st.sidebar:
         st.error(f"Invalid layup: {exc}")
 
     st.markdown("**Panel geometry**")
+    if "Lx_mm" not in st.session_state:
+        st.session_state["Lx_mm"] = 150.0
+    if "Ly_mm" not in st.session_state:
+        st.session_state["Ly_mm"] = 100.0
     col_lx, col_ly = st.columns(2)
-    Lx_mm = col_lx.number_input("Lx [mm]", min_value=10.0, max_value=2000.0, value=150.0, step=10.0)
-    Ly_mm = col_ly.number_input("Ly [mm]", min_value=10.0, max_value=2000.0, value=100.0, step=10.0)
+    Lx_mm = col_lx.number_input("Lx [mm]", min_value=10.0, max_value=2000.0, step=10.0, key="Lx_mm")
+    Ly_mm = col_ly.number_input("Ly [mm]", min_value=10.0, max_value=2000.0, step=10.0, key="Ly_mm")
     if expert_mode:
         boundary = st.selectbox(
             "Boundary condition",
@@ -600,10 +815,13 @@ with st.sidebar:
         boundary = "simply_supported"
 
     st.markdown("**Input mode**")
+    if "input_mode" not in st.session_state:
+        st.session_state["input_mode"] = "Impact event"
     input_mode = st.radio(
         "Damage source",
         ["Impact event", "C-scan inspection"],
         horizontal=False,
+        key="input_mode",
         help=(
             "**Impact event** — predict damage from impact energy via "
             "Olsson's quasi-static threshold model.\n\n"
@@ -617,20 +835,24 @@ with st.sidebar:
 
     if input_mode == "Impact event":
         st.markdown("**Impact event**")
+        if "energy_J" not in st.session_state:
+            st.session_state["energy_J"] = 30.0
+        if "diameter_mm" not in st.session_state:
+            st.session_state["diameter_mm"] = 16.0
         energy_J = st.number_input(
             "Energy [J]",
             min_value=0.1,
             max_value=200.0,
-            value=30.0,
             step=1.0,
+            key="energy_J",
             help="Kinetic energy of the impactor at contact.",
         )
         diameter_mm = st.number_input(
             "Impactor diameter [mm]",
             min_value=1.0,
             max_value=100.0,
-            value=16.0,
             step=1.0,
+            key="diameter_mm",
         )
         if expert_mode:
             impactor_shape = st.selectbox("Impactor shape", IMPACTOR_SHAPES, index=0)
@@ -696,10 +918,14 @@ with st.sidebar:
             damage_state = None
 
     st.markdown("**Analysis**")
+    if "tier" not in st.session_state:
+        st.session_state["tier"] = TIERS[0]
+    if "loading" not in st.session_state:
+        st.session_state["loading"] = "compression"
     tier = st.selectbox(
         "Tier",
         TIERS,
-        index=0,
+        key="tier",
         help=(
             "**empirical** — Soutis closed-form CAI, milliseconds.\n\n"
             "**semi_analytical** — Rayleigh-Ritz sublaminate buckling + "
@@ -712,6 +938,7 @@ with st.sidebar:
         "Loading mode",
         ["compression", "tension"],
         horizontal=True,
+        key="loading",
         help="CAI = compression-after-impact, TAI = tension-after-impact.",
     )
 
@@ -738,6 +965,12 @@ with st.sidebar:
             )
 
     run_clicked = st.button("Run analysis", type="primary", use_container_width=True)
+
+
+# Sync the live sidebar config into the URL so the page link is shareable.
+# Runs once per script execution, after all widgets have committed their
+# values to ``st.session_state``.
+_sync_query_params()
 
 
 # ---------------------------------------------------------------------------
