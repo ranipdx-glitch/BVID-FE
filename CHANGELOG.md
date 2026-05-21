@@ -4,6 +4,21 @@ All notable changes to BVID-FE are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **FE3D buckling assembled `K_g` with a tensile unit reference (issue #98),**
+  causing the eigensolver to lock onto spurious compliance modes that
+  decayed monotonically with mesh refinement. The geometric stiffness is
+  now assembled from a **compressive** unit reference (`sigma_xx =
+  -sigma_ref_MPa` at `src/bvidfe/analysis/fe_tier.py`), so the smallest
+  positive eigenvalue `lambda_crit` of `K phi + lambda K_g phi = 0` is the
+  physical compressive buckling stress in MPa directly. Knockdowns from the
+  `fe3d` tier shift accordingly — see #98 for the diagnostic, including
+  reference-config tables. The eigenvalue selection rule ("smallest
+  positive") is unchanged; under the new convention it is now correct.
+  In-plane locking on coarse meshes remains a separate open concern
+  (tracked on its own branch).
+
 ## [0.2.0] - 2026-05-21
 
 First tagged release after `0.1.0`. Major themes: a fully wired 3-D

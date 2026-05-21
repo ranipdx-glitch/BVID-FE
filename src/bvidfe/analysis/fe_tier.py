@@ -441,8 +441,17 @@ def fe3d_cai_buckling(
     # damaged-element load fraction is the IN-PLANE damage factor — pure
     # delamination zones still carry full uniaxial load (in_plane_factor ≈ 1.0)
     # because the plies remain intact; only fiber-break-core elements carry less.
+    #
+    # Sign convention (issue #98): K_g uses a COMPRESSIVE unit reference
+    # (sigma_xx = -1 MPa). The smallest positive eigenvalue lambda_crit of
+    # K phi + lambda K_g phi = 0 is then the compressive buckling stress in MPa
+    # directly (the eigenproblem scales linearly with the reference stress).
+    # A tensile reference would make K_g positive semi-definite and force the
+    # eigensolver onto spurious K_g-compliance modes that decay with mesh
+    # refinement; the compressive reference makes K_g indefinite as required
+    # for a real buckling problem.
     sigma_bar_ref = np.zeros((3, 3))
-    sigma_bar_ref[0, 0] = sigma_ref_MPa
+    sigma_bar_ref[0, 0] = -sigma_ref_MPa
     in_plane_factors = mesh.in_plane_damage_factors
 
     def _kg(e_idx: int) -> np.ndarray:
