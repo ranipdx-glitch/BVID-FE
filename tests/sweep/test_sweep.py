@@ -156,6 +156,65 @@ def test_sweep_energies_progress_callback_is_invoked():
     assert seen == [(1, 3), (2, 3), (3, 3)]
 
 
+def test_sweep_energies_progress_callback_three_arg_receives_inputs():
+    """Issue #112: the Streamlit UI passes a 3-arg callback so it can
+    render a live ``E=…J`` label. Existing 2-arg callbacks must keep
+    working (covered by ``..._progress_callback_is_invoked`` above) —
+    this test pins the 3-arg dispatch and the inputs-dict contract."""
+    cfg = _base_impact_cfg()
+    seen: list[tuple[int, int, dict]] = []
+    sweep_energies(
+        cfg,
+        energies_J=[5, 20],
+        progress_callback=lambda i, n, inp: seen.append((i, n, dict(inp))),
+    )
+    assert [(i, n) for i, n, _ in seen] == [(1, 2), (2, 2)]
+    assert seen[0][2] == {"energy_J": 5.0}
+    assert seen[1][2] == {"energy_J": 20.0}
+
+
+def test_sweep_progress_callback_exception_does_not_break_sweep():
+    """Issue #112: a buggy UI callback (e.g. a stale Streamlit handle on
+    a torn-down session) must not abort the whole sweep. The exception
+    is swallowed and logged at DEBUG; the DataFrame still finalises."""
+    cfg = _base_impact_cfg()
+    calls = {"n": 0}
+
+    def _bad_cb(i, n, inputs):
+        calls["n"] += 1
+        raise RuntimeError("UI callback exploded")
+
+    df = sweep_energies(cfg, energies_J=[5, 10], progress_callback=_bad_cb)
+    assert calls["n"] == 2
+    assert len(df) == 2
+    # Sweep itself succeeded — knockdowns are populated, error column NaN/empty.
+    assert df["knockdown"].notna().all()
+
+
+def test_sweep_layups_progress_callback_inputs_carries_layup():
+    """The 3-arg callback for ``sweep_layups`` carries the layup string."""
+    cfg = _base_impact_cfg()
+    seen: list[dict] = []
+    sweep_layups(
+        cfg,
+        layups=[[0, 90, 0, 90], [45, -45, 45, -45]],
+        progress_callback=lambda i, n, inp: seen.append(dict(inp)),
+    )
+    assert seen == [{"layup": "0/90/0/90"}, {"layup": "45/-45/45/-45"}]
+
+
+def test_sweep_thicknesses_progress_callback_inputs_carries_thickness():
+    """The 3-arg callback for ``sweep_thicknesses`` carries the thickness."""
+    cfg = _base_impact_cfg()
+    seen: list[dict] = []
+    sweep_thicknesses(
+        cfg,
+        ply_thicknesses_mm=[0.125, 0.200],
+        progress_callback=lambda i, n, inp: seen.append(dict(inp)),
+    )
+    assert seen == [{"ply_thickness_mm": 0.125}, {"ply_thickness_mm": 0.200}]
+
+
 def test_sweep_energies_rejects_unknown_on_error():
     cfg = _base_impact_cfg()
     import pytest

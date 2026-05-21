@@ -11,11 +11,19 @@ All three sweep entry points (`sweep_energies`, `sweep_layups`,
     results still reach the DataFrame and the CSV. ``"warn"`` is identical
     to ``"skip"`` but additionally emits a ``UserWarning`` per failure.
 
-  * ``progress_callback`` — optional ``Callable[[int, int], None]``
-    invoked as ``progress_callback(i_done, n_total)`` after each iteration
-    completes (success or failure). Used by the GUI ``SweepWorker`` to
-    drive its progress bar and by long-running scripts to report progress
-    to stderr / a logger.
+  * ``progress_callback`` — optional callable invoked once per iteration
+    to report progress. Two signatures are accepted (introspected at
+    runtime, so existing callers don't need to change):
+
+      - ``progress_callback(i_done, n_total)`` — legacy 2-arg form.
+      - ``progress_callback(i_done, n_total, inputs)`` — 3-arg form where
+        ``inputs`` is a small ``dict`` describing the iteration's swept
+        inputs (``energy_J``, ``layup``, or ``ply_thickness_mm``). Used by
+        the Streamlit UI to render a live ``E=…J`` progress label
+        (#112) and by the GUI ``SweepWorker`` to drive its progress bar.
+
+    Callback exceptions are caught and logged at DEBUG so a misbehaving
+    UI never aborts the sweep itself.
 
 Together these make sweeps robust to a single bad input (a degenerate
 mesh, a Tsai-Wu invalid combination, an out-of-range Olsson regime) and
@@ -25,19 +33,30 @@ aborted mid-run.
 
 from __future__ import annotations
 
+import inspect
+import logging
 import math
 import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Iterator, List, Optional, Sequence, Union
 
 import pandas as pd
 
 from bvidfe.analysis import AnalysisConfig, BvidAnalysis
 from bvidfe.impact.mapping import DPACapClipWarning, SmallMassQuasiStaticWarning
 
-_ProgressCallback = Callable[[int, int], None]
+logger = logging.getLogger(__name__)
+
+# Accept both 2-arg ``(i_done, n_total)`` and 3-arg
+# ``(i_done, n_total, inputs)`` progress callbacks — the latter (#112) carries
+# a small dict of the iteration's swept inputs so a UI can render a live
+# per-point label without re-implementing the loop.
+_ProgressCallback = Union[
+    Callable[[int, int], None],
+    Callable[[int, int, dict], None],
+]
 _ON_ERROR_VALUES = ("raise", "skip", "warn")
 
 
@@ -150,9 +169,48 @@ def _write_csv(df: pd.DataFrame, csv_path: Optional[Path]) -> None:
         df.to_csv(Path(csv_path), index=False)
 
 
-def _emit_progress(cb: Optional[_ProgressCallback], i: int, n: int) -> None:
-    if cb is not None:
-        cb(i, n)
+def _callback_accepts_inputs(cb: Callable[..., Any]) -> bool:
+    """Inspect ``cb`` to decide if it accepts the 3-arg ``(i, n, inputs)``
+    form. Falls back to the legacy 2-arg form on any introspection failure
+    (built-ins, C extensions, partials with unusual signatures, ...)."""
+    try:
+        params = inspect.signature(cb).parameters
+    except (TypeError, ValueError):
+        return False
+    # Count positional-capable params; *args is treated as accepting all.
+    positional = 0
+    for p in params.values():
+        if p.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 3
+
+
+def _emit_progress(
+    cb: Optional[_ProgressCallback],
+    i: int,
+    n: int,
+    inputs: Optional[dict] = None,
+) -> None:
+    """Invoke the progress callback, tolerating both 2-arg and 3-arg forms.
+
+    A buggy or slow callback (e.g. a Streamlit ``st.progress`` rendering
+    against a torn-down session) must never abort the sweep — exceptions
+    are swallowed at DEBUG.
+    """
+    if cb is None:
+        return
+    try:
+        if inputs is not None and _callback_accepts_inputs(cb):
+            cb(i, n, inputs)  # type: ignore[call-arg]
+        else:
+            cb(i, n)  # type: ignore[call-arg]
+    except Exception:  # noqa: BLE001 — callback errors must not sink the sweep
+        logger.debug("progress_callback raised; ignoring", exc_info=True)
 
 
 def sweep_energies(
@@ -181,7 +239,7 @@ def sweep_energies(
             row = _try_run_one(cfg, on_error, f"energy_J={float(E):g}")
             row["energy_J"] = float(E)
             rows.append(row)
-            _emit_progress(progress_callback, i + 1, n)
+            _emit_progress(progress_callback, i + 1, n, {"energy_J": float(E)})
     df = _finalize(rows, "energy_J")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -205,7 +263,7 @@ def sweep_layups(
             row = _try_run_one(cfg, on_error, f"layup={layup_str}")
             row["layup"] = layup_str
             rows.append(row)
-            _emit_progress(progress_callback, i + 1, n)
+            _emit_progress(progress_callback, i + 1, n, {"layup": layup_str})
     df = _finalize(rows, "layup")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
@@ -228,7 +286,7 @@ def sweep_thicknesses(
             row = _try_run_one(cfg, on_error, f"ply_thickness_mm={float(t):g}")
             row["ply_thickness_mm"] = float(t)
             rows.append(row)
-            _emit_progress(progress_callback, i + 1, n)
+            _emit_progress(progress_callback, i + 1, n, {"ply_thickness_mm": float(t)})
     df = _finalize(rows, "ply_thickness_mm")
     _write_csv(df, Path(csv_path) if csv_path else None)
     return df
