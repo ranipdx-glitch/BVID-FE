@@ -2,9 +2,18 @@
 
 All notable changes to BVID-FE are documented in this file.
 
-## [0.2.0-dev] - unreleased
+## [Unreleased]
 
-In-progress work toward v0.2.0. No tag yet.
+## [0.2.0] - 2026-05-21
+
+First tagged release after `0.1.0`. Major themes: a fully wired 3-D
+hex-element FE tier (`fe3d`) with eigenvalue buckling and FPF coupons,
+per-ply thickness throughout the stack, a Streamlit GUI, validated
+public datasets exercised in CI, a `SemiAnalyticalResult` dataclass on
+the semi-analytical path, vectorised LaRC05/Tsai-Wu failure-criterion
+batches, refreshed README/ARCHITECTURE docs, and the OIDC Trusted
+Publishing workflow that produced this release (issue #116). See the
+detailed entries below.
 
 ### Changed
 
