@@ -1,7 +1,12 @@
 import pytest
 
 from bvidfe.analysis.config import AnalysisConfig, MeshParams
-from bvidfe.analysis.fe_tier import FE3DSizeError, fe3d_cai, fe3d_tai
+from bvidfe.analysis.fe_tier import (
+    FE3DSizeError,
+    _fe3d_cai_first_ply_failure,
+    fe3d_cai,
+    fe3d_tai,
+)
 from bvidfe.core.geometry import ImpactorGeometry, PanelGeometry
 from bvidfe.core.laminate import Laminate
 from bvidfe.core.material import MATERIAL_LIBRARY
@@ -69,3 +74,22 @@ def test_fe3d_rejects_oversized_mesh():
         fe3d_cai(oversized_cfg, DamageState([], 0.0), lam, 500.0)
     with pytest.raises(FE3DSizeError):
         fe3d_tai(oversized_cfg, DamageState([], 0.0), lam, 800.0)
+
+
+def test_fe3d_fpf_accepts_explicit_criterion(small_cfg):
+    """``_fe3d_cai_first_ply_failure`` must accept ``criterion="tsai_wu"``
+    instead of hardcoding LaRC05. The default behaviour (no kwarg) stays
+    LaRC05 — verified by comparing the explicit-larc05 call against the
+    default call.
+    """
+    lam = Laminate(MATERIAL_LIBRARY["IM7/8552"], small_cfg.layup_deg, small_cfg.ply_thickness_mm)
+    damage = DamageState([], dent_depth_mm=0.0)
+
+    sigma_default = _fe3d_cai_first_ply_failure(small_cfg, damage, lam, 500.0)
+    sigma_larc05 = _fe3d_cai_first_ply_failure(small_cfg, damage, lam, 500.0, criterion="larc05")
+    sigma_tsai = _fe3d_cai_first_ply_failure(small_cfg, damage, lam, 500.0, criterion="tsai_wu")
+
+    # Default must match explicit larc05 (preserves prior behaviour).
+    assert sigma_default == pytest.approx(sigma_larc05, rel=1e-12)
+    # All paths return positive residual strength on a pristine panel.
+    assert sigma_tsai > 0

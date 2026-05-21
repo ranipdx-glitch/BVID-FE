@@ -19,6 +19,7 @@ from bvidfe.analysis.fe_mesh import FeMesh, build_fe_mesh, estimate_fe_mesh_size
 from bvidfe.core.laminate import Laminate
 from bvidfe.damage.state import DamageState
 from bvidfe.elements.hex8 import Hex8Element, build_geometry_table
+from bvidfe.failure.evaluator import CriterionName
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
 from bvidfe.solver.assembler import assemble_coo, assemble_global_stiffness
@@ -213,7 +214,7 @@ def _solve_failure_strain_analytic(
     mesh: FeMesh,
     elements: List[Hex8Element],
     strain_sign: int,
-    criterion: str,
+    criterion: CriterionName,
     strain_cap: float = 0.05,
 ) -> float:
     """Find the applied strain magnitude at which max failure index hits 1,
@@ -304,7 +305,7 @@ def _solve_failure_strain_analytic_scalar_ref(
     mesh: FeMesh,
     elements: List[Hex8Element],
     strain_sign: int,
-    criterion: str,
+    criterion: CriterionName,
     strain_cap: float = 0.05,
 ) -> float:
     """Reference (pre-vectorisation) scalar implementation of
@@ -369,11 +370,14 @@ def _fe3d_cai_first_ply_failure(
     damage: DamageState,
     lam: Laminate,
     sigma_pristine_MPa: float,
+    criterion: CriterionName = "larc05",
 ) -> float:
     """3D FE compression-after-impact residual strength via first-ply-failure (MPa).
 
-    Original v0.1.0 implementation — bisects on applied strain until LaRC05 failure
-    index reaches 1 on the damaged mesh. Retained as fallback / comparison path.
+    Original v0.1.0 implementation — bisects on applied strain until the selected
+    failure criterion's index reaches 1 on the damaged mesh. Retained as
+    fallback / comparison path. Default ``criterion="larc05"`` preserves the
+    historical behaviour; pass ``"tsai_wu"`` to use the polynomial criterion.
     """
     mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d FPF")
     strain_at_failure = _solve_failure_strain_analytic(
@@ -381,7 +385,7 @@ def _fe3d_cai_first_ply_failure(
         mesh,
         elements,
         strain_sign=-1,
-        criterion="larc05",
+        criterion=criterion,
     )
     _t("FPF analytic solve done", t0)
     E = _effective_modulus(lam)
