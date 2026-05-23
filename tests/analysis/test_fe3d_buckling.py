@@ -1,4 +1,5 @@
-"""Tests for the fe3d linear buckling CAI path."""
+"""Tests for the fe3d CAI buckling channel (Rayleigh-Ritz closed-form
+delegation, #129)."""
 
 import pytest
 
@@ -41,6 +42,61 @@ def test_fe3d_cai_buckling_damaged_less_than_pristine(small_cfg):
     sigma_pristine, _, _ = fe3d_cai_buckling(small_cfg, DamageState([], 0.0), lam, 500.0)
     sigma_damaged, _, _ = fe3d_cai_buckling(small_cfg, ds, lam, 500.0)
     assert 0 < sigma_damaged <= sigma_pristine
+
+
+def test_fe3d_cai_buckling_sublaminate_path_binds_on_thin_panel():
+    """The damaged-vs-pristine ordering on ``small_cfg`` saturates against
+    ``sigma_pristine_MPa`` (the small coupon's plate buckling load is huge),
+    so the test above can't verify the sublaminate path actually engages.
+    This test uses a wider panel with a large delamination so the
+    sublaminate buckling stress is strictly below pristine and strictly
+    below the full-panel buckling stress — proving min(panel, sublam) picks
+    the sublaminate when it should.
+    """
+    cfg = AnalysisConfig(
+        material="IM7/8552",
+        layup_deg=[0, 45, -45, 90, 90, -45, 45, 0],
+        ply_thickness_mm=0.152,
+        panel=PanelGeometry(150.0, 100.0, boundary="simply_supported"),
+        loading="compression",
+        tier="fe3d",
+        damage=DamageState(
+            [DelaminationEllipse(3, (75.0, 50.0), 40.0, 30.0, 0.0)], dent_depth_mm=0.5
+        ),
+        mesh=MeshParams(elements_per_ply=1, in_plane_size_mm=10.0),
+    )
+    lam = Laminate(MATERIAL_LIBRARY["IM7/8552"], cfg.layup_deg, cfg.ply_thickness_mm)
+    sigma_pristine_panel, _, _ = fe3d_cai_buckling(
+        cfg, DamageState([], 0.0), lam, sigma_pristine_MPa=600.0
+    )
+    sigma_damaged, _, _ = fe3d_cai_buckling(cfg, cfg.damage, lam, sigma_pristine_MPa=600.0)
+    assert sigma_damaged < sigma_pristine_panel
+    assert sigma_damaged < 600.0  # neither path saturates
+
+
+def test_fe3d_cai_buckling_canonical_panel_value():
+    """Regression test pinning the buckling stress on the canonical
+    200x150 mm 8-ply quasi-isotropic IM7/8552 pristine reference (issue #129).
+
+    The Rayleigh-Ritz closed form is exact for this configuration; a
+    regression to a different formulation (or a unit-conversion bug) would
+    move this number by an order of magnitude. The expected value is
+    derived from D11/D22/D12/D66 of the laminate and the
+    Navier sine-basis solution minimised over (m, n) in [1..5].
+    """
+    cfg = AnalysisConfig(
+        material="IM7/8552",
+        layup_deg=[0, 45, -45, 90, 90, -45, 45, 0],
+        ply_thickness_mm=0.152,
+        panel=PanelGeometry(200.0, 150.0, boundary="simply_supported"),
+        loading="compression",
+        tier="fe3d",
+        damage=DamageState([], dent_depth_mm=0.0),
+        mesh=MeshParams(elements_per_ply=1, in_plane_size_mm=10.0),
+    )
+    lam = Laminate(MATERIAL_LIBRARY["IM7/8552"], cfg.layup_deg, cfg.ply_thickness_mm)
+    sigma, _, _ = fe3d_cai_buckling(cfg, cfg.damage, lam, sigma_pristine_MPa=887.5)
+    assert 12.0 < sigma < 13.0, f"expected ~12.6 MPa, got {sigma}"
 
 
 def test_bvid_analysis_fe3d_cai_uses_buckling_path(small_cfg):

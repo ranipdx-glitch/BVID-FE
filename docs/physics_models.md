@@ -32,8 +32,11 @@ preserved (the plies themselves remain intact). Inside the fiber-break core
 under the impact site, in-plane stiffness is also reduced
 (`DAMAGE_FIBER_BREAK_INPLANE_FACTOR ≈ 0.30`) to represent fiber bundle
 fracture. First-ply-failure is evaluated at all Gauss points using LaRC05
-(CAI) and Tsai-Wu (TAI). For CAI, a true linear buckling eigensolve runs
-alongside FPF and the lower of the two governs.
+(CAI) and Tsai-Wu (TAI). For CAI, the buckling channel delegates to the
+Rayleigh-Ritz closed form (issue #129) — the 3D K_g eigensolve previously
+used here was retired because 3D Hex on thin laminates locks too
+aggressively at affordable mesh sizes — and the lower of the buckling
+and FPF stresses governs.
 
 ## Knockdown definition and cross-tier comparability
 
@@ -89,12 +92,14 @@ lamina-level strengths from the material card:
   cohesive surfaces with bilinear traction-separation laws. Cohesive surfaces
   are deferred to a future release.
 - **The `fe3d` tier's knockdown is partially insensitive to impact energy**
-  above the Olsson threshold. Linear buckling now responds to delamination
-  size, but the FPF fallback strain is controlled by stress concentration
-  at the healthy/damaged boundary rather than damage magnitude. For
-  energy-dependent knockdown curves prefer `tier="empirical"` or
-  `tier="semi_analytical"`. Full energy-monotonicity (in-plane pre-stress
-  BCs + cohesive surfaces) is v0.3.0 scope.
+  above the Olsson threshold. The buckling channel (delegated to the
+  Rayleigh-Ritz closed form per #129) responds to delamination size
+  through the worst-sublaminate path, but the FPF fallback strain is
+  controlled by stress concentration at the healthy/damaged boundary
+  rather than damage magnitude. For energy-dependent knockdown curves
+  prefer `tier="empirical"` or `tier="semi_analytical"`. Full
+  energy-monotonicity (cohesive surfaces + proper load-introduction BCs)
+  is v0.3.0 scope.
 - No validated datasets included; comparison against published Soutis,
   Caprino, and NASA datasets is on the roadmap.
 

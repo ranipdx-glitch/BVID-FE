@@ -4,6 +4,34 @@ All notable changes to BVID-FE are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **FE3D buckling channel retired the 3D K_g eigensolve in favour of the
+  Rayleigh-Ritz closed form (issue #129, PR #130).** Investigation on the
+  #98 thread established that even after the K_g sign fix (#128), the 3D
+  eigensolve under-predicted by ~100x on realistic panels: the
+  constant-prestress + 3-2-1 rigid-body BC formulation did not enforce a
+  compressive state, and a proper static-prestress reformulation didn't
+  recover analytical agreement at affordable mesh sizes (3D Hex on thin
+  laminates is fundamentally locking-prone). The Navier sine-basis
+  closed form (Timoshenko & Gere §9.2; Reddy 4.4.4) is exact for SSSS
+  orthotropic rectangles, so `fe3d_cai_buckling` now delegates to it via
+  a new `panel_buckling_load` helper that shares its `_rayleigh_ritz_N_cr`
+  kernel with the existing `sublaminate_buckling_load`. For damaged
+  panels the worst-sublaminate check still runs; the buckling channel
+  returns `min(sigma_panel, sigma_sublam)`. The first-ply-failure channel
+  on the damaged 3D mesh is unchanged. On the canonical 200x150 mm 8-ply
+  QI pristine reference (IM7/8552, t_ply=0.152), the buckling channel
+  now returns 12.6 MPa, matching the Rayleigh-Ritz analytical solution
+  exactly; before this change it returned 0.20 MPa (60x under).
+- **Removed the 5%-of-pristine plausibility guard in `BvidAnalysis.run`.**
+  It was a defensive workaround for the broken eigensolve; the closed
+  form returns the physically correct value (which can legitimately be
+  below 5% of pristine on slender panels). Collapsed the
+  `fe3d_buckling_unconverged` and `fe3d_buckling_artefact_dropped`
+  warning tags into a single `fe3d_buckling_fallback` tag emitted only
+  when the closed form returns a degenerate result.
+
 ### Fixed
 
 - **FE3D buckling assembled `K_g` with a tensile unit reference (issue #98),**

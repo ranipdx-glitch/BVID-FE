@@ -17,7 +17,8 @@ class FieldResults:
     .. note::
        **Currently always ``None``.** ``BvidAnalysis.run()`` does not yet
        populate ``AnalysisResults.field_results`` for any tier (the fe3d
-       tier returns scalar residual strength + buckling eigenvalues only).
+       tier returns scalar residual strength + the scalar buckling stress
+       stored in ``buckling_eigenvalues``).
        This dataclass documents the *intended* contract for a future
        field-output release; downstream code should treat
        ``result.field_results`` as optional and handle ``None``.
@@ -83,10 +84,9 @@ class AnalysisResults:
 
     ``notes`` carries free-form runtime diagnostics emitted by the analysis
     backends — primarily silent fallbacks that affect the interpretation of
-    ``knockdown`` (e.g. fe3d buckling eigensolve returning pristine because
-    no positive eigenvalue was found, or the buckling-plausibility gate
-    discarding a tiny eigenvalue and using FPF instead). Empty list when
-    the run produced no diagnostic-worthy events.
+    ``knockdown`` (e.g. the fe3d buckling channel returning pristine because
+    the Rayleigh-Ritz closed form gave a degenerate result, #129). Empty
+    list when the run produced no diagnostic-worthy events.
     """
 
     residual_strength_MPa: float
