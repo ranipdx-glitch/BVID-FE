@@ -100,35 +100,23 @@ class BvidAnalysis:
             field_results = None
         elif self.config.tier == "fe3d":
             if self.config.loading == "compression":
-                # Run both paths, but only use the buckling stress if it is
-                # physically plausible. v0.2.0-dev's buckling model uses a
-                # simplified uniform-pre-stress approximation with 3-point
-                # rigid-body BCs; on realistic panels the absolute eigenvalue
-                # can be dramatically off from analytical plate buckling. If
-                # it's less than 5% of pristine we treat it as a numerical
-                # artefact and fall back to FPF. A future release will wire
-                # proper in-plane pre-stress BCs into the buckling path.
+                # Buckling delegates to the Rayleigh-Ritz closed form
+                # (#129); only a degenerate input (returned via the
+                # ``buckling_notes`` channel) triggers the pristine
+                # fallback. The implausibility guard previously here
+                # existed because the old 3D K_g eigensolve mis-predicted
+                # by ~100x and we needed to discard its result; with the
+                # closed-form delegation a sub-5%-of-pristine answer is
+                # the physically expected outcome for slender panels and
+                # must be kept.
                 sigma_buckling, lambda_crit, buckling_notes = fe3d_cai_buckling(
                     self.config, damage, lam, sigma_0
                 )
                 notes.extend(buckling_notes)
                 if buckling_notes:
-                    warnings_tags.append("fe3d_buckling_unconverged")
+                    warnings_tags.append("fe3d_buckling_fallback")
                 sigma_fpf = _fe3d_cai_first_ply_failure(self.config, damage, lam, sigma_0)
-                buckling_plausible = sigma_buckling >= 0.05 * sigma_0
-                if not buckling_plausible and not buckling_notes:
-                    # Buckling solve completed but produced an implausibly small
-                    # result — surface that the FPF path is what the user is
-                    # actually seeing. (If `buckling_notes` is already populated
-                    # the eigensolve reported its own failure; no need to layer
-                    # a second note for the same root cause.)
-                    notes.append(
-                        f"fe3d buckling: result {sigma_buckling:.1f} MPa is below "
-                        f"5% of pristine ({sigma_0:.1f} MPa); discarded as a "
-                        "numerical artefact and used first-ply-failure instead."
-                    )
-                    warnings_tags.append("fe3d_buckling_artefact_dropped")
-                sigma = min(sigma_buckling, sigma_fpf) if buckling_plausible else sigma_fpf
+                sigma = min(sigma_buckling, sigma_fpf)
                 buckling_eigs = [lambda_crit] if lambda_crit > 0 else None
             else:
                 sigma = fe3d_tai(self.config, damage, lam, sigma_0)

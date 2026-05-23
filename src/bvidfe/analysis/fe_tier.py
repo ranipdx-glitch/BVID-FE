@@ -1,7 +1,10 @@
 """3D finite-element tier for BVID-FE.
 
-v0.2.0: Primary CAI path uses geometric-stiffness-based linear buckling.
-First-ply-failure on damaged mesh is retained as a fallback / comparison.
+The CAI residual is the minimum of two channels:
+- a first-ply-failure analysis on the damaged 3D mesh (this module's
+  distinctive value: 3D stress states with per-element damage factors);
+- a buckling stress from the Rayleigh-Ritz closed form (delegated to
+  :mod:`bvidfe.analysis.semi_analytical`, #129).
 """
 
 from __future__ import annotations
@@ -22,13 +25,12 @@ from bvidfe.damage.state import DamageState
 from bvidfe.elements.hex8 import Hex8Element, build_geometry_table
 from bvidfe.failure.larc05 import larc05_index, larc05_index_batch
 from bvidfe.failure.tsai_wu import tsai_wu_index, tsai_wu_index_batch
-from bvidfe.solver.assembler import assemble_coo, assemble_global_stiffness
-from bvidfe.solver.boundary import (
-    BoundaryCondition,
-    apply_dirichlet_penalty,
-    uniaxial_x_bcs,
+from bvidfe.analysis.semi_analytical import (
+    find_critical_interface,
+    panel_buckling_load,
+    sublaminate_buckling_load,
 )
-from bvidfe.solver.buckling import linear_buckling
+from bvidfe.solver.boundary import uniaxial_x_bcs
 from bvidfe.solver.static import solve_linear_static
 
 # Configure a module-level logger that writes to stderr. Users launching
@@ -405,142 +407,61 @@ def fe3d_cai_buckling(
     sigma_pristine_MPa: float,
     sigma_ref_MPa: float = 1.0,
 ) -> tuple[float, float, List[str]]:
-    """3D FE compression-after-impact via true linear buckling eigensolve.
+    """3D FE compression-after-impact buckling channel — closed-form delegation.
 
-    Assembles K and K_g under a constant uniaxial pre-stress sigma_ref along x
-    (scaled by per-element damage factor), then solves K phi = lambda K_g phi for
-    the smallest positive eigenvalue. Critical buckling stress = lambda * sigma_ref.
+    Issue #129: the previous 3D K_g eigensolve under-predicted by ~100x on
+    realistic panels because the constant-prestress + 3-2-1 rigid-body BC
+    formulation didn't actually enforce a compressive state, and plain Hex8
+    locks too aggressively for thin laminates at practical mesh sizes.
+    Investigation also showed that even a proper static-prestress
+    reformulation did not converge to closed-form within an order of
+    magnitude. The Rayleigh-Ritz closed form (Timoshenko & Gere §9.2;
+    Reddy 4.4.4) is exact for SSSS orthotropic rectangles, so the buckling
+    channel now delegates to it via
+    :func:`bvidfe.analysis.semi_analytical.panel_buckling_load`.
 
-    Uses the "constant pre-stress" approximation (Cook §17.7 / Bathe §6.8):
-    - sigma_0 = sigma_ref_MPa along x everywhere (unit reference compression).
-    - Damaged elements carry in_plane_damage_factor * sigma_0 (reduced load
-      fraction in fiber-break-core elements; pure-delamination elements carry
-      the full uniaxial load because the plies remain intact).
-    - K_g is assembled element-by-element from Hex8Element.geometric_stiffness_matrix().
-    - A minimal penalty-BC set suppresses rigid-body modes before the eigensolve.
-
-    Returns
-    -------
-    (sigma_critical_MPa, lambda_crit, notes)
-        sigma_critical_MPa : min(lambda_crit * sigma_ref, sigma_pristine_MPa)
-        lambda_crit        : smallest positive buckling load factor (0 if solve failed)
-        notes              : list of human-readable diagnostic strings emitted
-                             during this call (e.g. eigensolver failure /
-                             no-positive-eigenvalue fallback). Empty when the
-                             solve was clean. Surfaced via
-                             ``AnalysisResults.notes``.
+    For damaged panels the sublaminate-over-delamination check from
+    :func:`bvidfe.analysis.semi_analytical.sublaminate_buckling_load` also
+    runs; the minimum of the full-panel and worst-sublaminate buckling
+    stress is returned. fe3d's distinctive value is still in the FPF
+    channel (3D stress states + per-element damage factors), which runs
+    independently.
     """
-    mesh, elements, t0 = _fe3d_preflight(cfg, damage, lam, label="fe3d buckling")
-
-    # Assemble elastic stiffness K
-    K = assemble_global_stiffness(elements, mesh.element_dof_maps, mesh.n_dof)
-    _t("K assembled", t0)
-
-    # Assemble geometric stiffness K_g under uniform uniaxial pre-stress sigma_ref along x.
-    # The pre-stress is sigma_xx (Voigt index 0, an in-plane component), so the
-    # damaged-element load fraction is the IN-PLANE damage factor — pure
-    # delamination zones still carry full uniaxial load (in_plane_factor ≈ 1.0)
-    # because the plies remain intact; only fiber-break-core elements carry less.
-    #
-    # Sign convention (issue #98): K_g uses a COMPRESSIVE unit reference
-    # (sigma_xx = -1 MPa). The smallest positive eigenvalue lambda_crit of
-    # K phi + lambda K_g phi = 0 is then the compressive buckling stress in MPa
-    # directly (the eigenproblem scales linearly with the reference stress).
-    # A tensile reference would make K_g positive semi-definite and force the
-    # eigensolver onto spurious K_g-compliance modes that decay with mesh
-    # refinement; the compressive reference makes K_g indefinite as required
-    # for a real buckling problem.
-    sigma_bar_ref = np.zeros((3, 3))
-    sigma_bar_ref[0, 0] = -sigma_ref_MPa
-    in_plane_factors = mesh.in_plane_damage_factors
-
-    def _kg(e_idx: int) -> np.ndarray:
-        return elements[e_idx].geometric_stiffness_matrix(
-            sigma_bar_ref * float(in_plane_factors[e_idx])
-        )
-
-    # Share the COO assembler with assemble_global_stiffness so the two
-    # build paths cannot drift, and re-use its pre-allocated buffers
-    # (issue #33: the old list-of-chunks build doubled peak memory near
-    # the FE3D_MAX_DOF cap and SIGKILLed on 16 GB workstations).
-    Kg = assemble_coo(mesh.element_dof_maps, mesh.n_dof, _kg)
-    _t("Kg assembled", t0)
-
-    # Apply penalty BCs to K (not Kg) — rigid-body suppression plus
-    # boundary-dependent lateral restraint so the GUI's boundary selector
-    # produces a visible effect on the buckling eigenvalue.
-    n_dof = K.shape[0]
-    bcs = [
-        BoundaryCondition(dof=0, value=0.0),
-        BoundaryCondition(dof=1, value=0.0),
-        BoundaryCondition(dof=2, value=0.0),
-        BoundaryCondition(dof=4, value=0.0),
-        BoundaryCondition(dof=5, value=0.0),
-        BoundaryCondition(dof=7, value=0.0),
-    ]
-    # Boundary-dependent out-of-plane (u_z) restraint on the panel edges:
-    #   simply_supported : pin u_z on the two loaded edges (x_min, x_max)
-    #   clamped          : pin u_z on all four lateral edges
-    #   free             : no additional restraint (only rigid-body)
     boundary = cfg.panel.boundary
-    if boundary != "free":
-        coords = mesh.node_coords
-        tol = 1e-6
-        x_min, x_max = coords[:, 0].min(), coords[:, 0].max()
-        y_min, y_max = coords[:, 1].min(), coords[:, 1].max()
-        loaded_edge_mask = (np.abs(coords[:, 0] - x_min) < tol) | (
-            np.abs(coords[:, 0] - x_max) < tol
-        )
-        if boundary == "clamped":
-            lateral_edge_mask = (
-                loaded_edge_mask
-                | (np.abs(coords[:, 1] - y_min) < tol)
-                | (np.abs(coords[:, 1] - y_max) < tol)
-            )
-        else:  # simply_supported
-            lateral_edge_mask = loaded_edge_mask
-        for node_idx in np.where(lateral_edge_mask)[0]:
-            # u_z is DOF 3*node_idx + 2
-            bcs.append(BoundaryCondition(dof=3 * int(node_idx) + 2, value=0.0))
-    F_dummy = np.zeros(n_dof)
-    K_mod, _ = apply_dirichlet_penalty(K, F_dummy, bcs, penalty=1.0e10)
-    # apply_dirichlet_penalty returns a fresh CSC matrix; the un-penalised K
-    # is not used downstream. Drop it so its memory is freed before the
-    # eigensolver allocates ARPACK workspaces (issue #33).
-    del K
+    notes: List[str] = []
 
-    # Solve generalised eigenproblem K phi = lambda K_g phi for smallest positive eig.
-    try:
-        n_req = min(6, n_dof - 1)
-        eigs, _ = linear_buckling(K_mod, Kg, n_modes=n_req)
-        _t(f"eigsh returned {len(eigs)} values", t0)
-        positive_eigs = [float(e) for e in eigs if e > 1e-6]
-        if not positive_eigs:
-            _log.info("fe3d buckling: no positive eigenvalue, returning pristine")
-            note = (
-                "fe3d buckling: eigensolver returned no positive eigenvalue; "
-                "fell back to pristine strength (knockdown=1.0 may not reflect "
-                "actual damage effect)"
-            )
-            return sigma_pristine_MPa, 0.0, [note]
-        lambda_crit = min(positive_eigs)
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("fe3d buckling eigensolve failed: %s", exc)
+    t_total = float(sum(lam.ply_thicknesses_mm))
+    N_cr_panel = panel_buckling_load(lam, cfg.panel.Lx_mm, cfg.panel.Ly_mm, boundary)
+    sigma_critical = N_cr_panel / t_total if t_total > 0 else float("inf")
+
+    if damage.delaminations:
+        crit_idx = find_critical_interface(damage, lam)
+        if crit_idx is not None:
+            ellipses = [e for e in damage.delaminations if e.interface_index == crit_idx]
+            critical_ellipse = max(ellipses, key=lambda e: e.area_mm2)
+            N_cr_sub = sublaminate_buckling_load(lam, critical_ellipse, boundary=boundary)
+            thicknesses = lam.ply_thicknesses_mm
+            upper_t = sum(thicknesses[: crit_idx + 1])
+            lower_t = sum(thicknesses[crit_idx + 1 :])
+            sub_t = min(upper_t, lower_t)
+            if sub_t > 0:
+                sigma_sublam = N_cr_sub / sub_t
+                sigma_critical = min(sigma_critical, sigma_sublam)
+
+    if not np.isfinite(sigma_critical) or sigma_critical <= 0:
         note = (
-            f"fe3d buckling: eigensolver raised {type(exc).__name__}: {exc}; "
-            "fell back to pristine strength (knockdown=1.0 does not reflect "
-            "actual damage effect)"
+            "fe3d buckling: closed-form Rayleigh-Ritz returned a degenerate "
+            "result; fell back to pristine strength (knockdown=1.0 may not "
+            "reflect actual damage effect)"
         )
         return sigma_pristine_MPa, 0.0, [note]
 
-    sigma_critical = lambda_crit * sigma_ref_MPa
+    lambda_crit = sigma_critical / sigma_ref_MPa
     _log.info(
-        "fe3d buckling done: lambda_crit=%.4g sigma_crit=%.1f MPa (total %.2fs)",
-        lambda_crit,
+        "fe3d buckling: sigma_crit=%.1f MPa (closed-form Rayleigh-Ritz)",
         sigma_critical,
-        time.time() - t0,
     )
-    return min(sigma_critical, sigma_pristine_MPa), lambda_crit, []
+    return min(sigma_critical, sigma_pristine_MPa), lambda_crit, notes
 
 
 def fe3d_cai(
@@ -551,13 +472,13 @@ def fe3d_cai(
 ) -> float:
     """3D FE compression-after-impact residual strength (MPa).
 
-    Primary path: true linear buckling eigensolve (fe3d_cai_buckling).
-    Fallback: first-ply-failure on damaged mesh (_fe3d_cai_first_ply_failure).
-    Returns the smaller of the two — whichever failure mode governs.
+    The smaller of the buckling channel (``fe3d_cai_buckling``, delegated
+    to the Rayleigh-Ritz closed form per #129) and the first-ply-failure
+    channel on the damaged mesh (``_fe3d_cai_first_ply_failure``).
 
-    Notes from the buckling solve are discarded by this convenience wrapper;
-    callers that need them should invoke fe3d_cai_buckling directly (as
-    BvidAnalysis.run does).
+    Notes from the buckling channel are discarded by this convenience
+    wrapper; callers that need them should invoke ``fe3d_cai_buckling``
+    directly (as ``BvidAnalysis.run`` does).
     """
     sigma_buckling, _lambda_crit, _notes = fe3d_cai_buckling(cfg, damage, lam, sigma_pristine_MPa)
     sigma_fpf = _fe3d_cai_first_ply_failure(cfg, damage, lam, sigma_pristine_MPa)

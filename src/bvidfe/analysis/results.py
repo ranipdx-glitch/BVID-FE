@@ -106,11 +106,9 @@ class AnalysisResults:
     #: buckling eigensolve failed") without string-scraping ``notes``.
     #: Populated tags (default ``[]``):
     #:
-    #: - ``"fe3d_buckling_unconverged"`` — the fe3d buckling eigensolve
-    #:   reported its own failure; residual is from first-ply failure.
-    #: - ``"fe3d_buckling_artefact_dropped"`` — buckling solved but the
-    #:   result was below 5% of pristine and was discarded as a numerical
-    #:   artefact; residual is from first-ply failure.
+    #: - ``"fe3d_buckling_fallback"`` — the fe3d buckling channel
+    #:   (Rayleigh-Ritz closed-form delegation, #129) returned a degenerate
+    #:   result and fell back to pristine strength.
     #:
     #: The ``impactor_mass_ratio_below_unity`` / ``dpa_panel_area_cap_clipped``
     #: regimes currently surface only via Python ``UserWarning`` + ``notes``;
