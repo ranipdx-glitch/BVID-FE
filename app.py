@@ -1255,28 +1255,39 @@ with tabs[3]:
 # --- Buckling tab ---------------------------------------------------------
 
 with tabs[4]:
-    st.subheader("Buckling eigenvalues")
+    st.subheader("Buckling indicator")
     if payload is None:
-        st.info("Run an analysis to see buckling eigenvalues.")
+        st.info("Run an analysis to see the buckling indicator.")
     else:
         eigs = payload["buckling_eigenvalues"]
         tier_used = payload["result_dict"]["tier_used"]
         if not eigs:
             st.info(
-                f"Tier '{tier_used}' does not produce buckling eigenvalues. "
+                f"Tier '{tier_used}' does not produce a buckling indicator. "
                 "Switch to **semi_analytical** or **fe3d** to populate this "
                 "tab."
             )
         else:
-            df_eigs = pd.DataFrame(
-                {
-                    "mode": list(range(1, len(eigs) + 1)),
-                    "buckling load factor [-]": eigs,
-                }
-            )
+            # Units depend on tier:
+            # - semi_analytical: N_cr (force per unit sublaminate width, N/mm)
+            # - fe3d: sigma_crit (compressive buckling stress, MPa) via the
+            #   Rayleigh-Ritz closed form (#129).
+            if tier_used == "fe3d":
+                col_label, unit_note = (
+                    "σ_crit [MPa]",
+                    "fe3d: critical compressive buckling stress from the "
+                    "Rayleigh-Ritz closed form (#129).",
+                )
+            else:
+                col_label, unit_note = (
+                    "N_cr [N/mm]",
+                    "semi_analytical: critical sublaminate buckling force " "per unit width.",
+                )
+            st.caption(unit_note)
+            df_eigs = pd.DataFrame({"mode": list(range(1, len(eigs) + 1)), col_label: eigs})
             st.bar_chart(df_eigs.set_index("mode"))
             st.dataframe(
-                df_eigs.style.format({"buckling load factor [-]": "{:.4g}"}),
+                df_eigs.style.format({col_label: "{:.4g}"}),
                 use_container_width=True,
             )
 

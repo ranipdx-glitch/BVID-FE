@@ -94,11 +94,13 @@ residual-strength numerator differs:
 - `semi_analytical`: `min(Soutis, sublaminate buckling)` for CAI; delegates
   to Whitney-Nuismer for TAI (so its TAI knockdown is mathematically
   identical to `empirical`).
-- `fe3d`: `min(linear-buckling eigenvalue × σ_ref, first-ply-failure)`,
-  capped at the pristine reference. If the buckling eigensolve finds no
-  positive eigenvalue, or the result is below 5% of pristine, the buckling
-  branch is silently dropped — which means an `fe3d` knockdown of 1.0 can
-  reflect an unconverged buckling solve rather than zero damage effect.
+- `fe3d`: `min(panel_buckling, sublaminate_buckling, first-ply-failure)`,
+  capped at the pristine reference. The buckling channel delegates to the
+  Rayleigh-Ritz closed form (issue #129); when the closed form returns a
+  degenerate result the buckling branch falls back to pristine and a
+  `fe3d_buckling_fallback` tag is added to `result.warnings`, so an `fe3d`
+  knockdown of 1.0 is distinguishable from "no damage" by inspecting
+  `result.notes` / `result.warnings`.
 
 Cross-tier expectations:
 
@@ -188,7 +190,8 @@ config = AnalysisConfig(material=my_mat, ...)  # pass the object directly
 ## Logging
 
 Both CLI and GUI stream stage-by-stage timing lines to stderr under:
-- `bvidfe.fe3d` — mesh build, K/Kg assembly, eigensolve, FPF
+- `bvidfe.fe3d` — mesh build, K assembly, FPF analytic solve; buckling
+  channel is a closed-form delegation (no log line of its own)
 - `bvidfe.gui` — worker heartbeats, tab update timings
 
 ```bash

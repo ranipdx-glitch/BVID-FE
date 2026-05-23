@@ -35,7 +35,7 @@ inner layers directly.
 | `solver/` | `static.py` | `StaticSolver` — sparse-direct linear static solve (SciPy). |
 | | `assembler.py` | COO → CSC global stiffness matrix assembly from element contributions. |
 | | `boundary.py` | `BoundaryCondition`, `BoundaryHandler` — penalty-method Dirichlet BCs for compression and tension loading. |
-| | `buckling.py` | Linear eigenvalue buckling solve (`scipy.sparse.linalg.eigsh`) for sublaminate-buckling CAI. |
+| | `buckling.py` | Generic linear eigenvalue buckling utility (`scipy.sparse.linalg.eigsh`). No longer called from the `fe3d` tier as of #129 — kept as a utility for future plate/shell-element buckling work. |
 | `failure/` | `larc05.py` | Minimal LaRC05 composite failure criterion (Hashin-3D reduction). |
 | | `tsai_wu.py` | Full 3D Tsai-Wu failure criterion with interaction terms. |
 | | `soutis_openhole.py` | Soutis open-hole-equivalent CAI model + Whitney-Nuismer TAI (point-stress and average-stress). |
@@ -44,7 +44,7 @@ inner layers directly.
 | | `bvid.py` | `BvidAnalysis(AnalysisConfig).run()` — main orchestrator; dispatches to tier; merges fe3d buckling fallbacks into `AnalysisResults.notes`. |
 | | `results.py` | `AnalysisResults` dataclass (`residual_strength_MPa`, `pristine_strength_MPa`, `knockdown`, `notes`, `field_results`, ...) with `summary()` and `to_dict()`. |
 | | `semi_analytical.py` | Semi-analytical tier implementation (Rayleigh-Ritz sublaminate buckling + Soutis CAI; Whitney-Nuismer TAI). |
-| | `fe_tier.py` | 3D FE tier implementation: damaged mesh build, K + Kg assembly, eigenvalue buckling (`fe3d_cai_buckling`) and FPF (`_fe3d_cai_first_ply_failure`) for CAI, FPF for TAI. Component-wise damage scaling via Voigt mask. |
+| | `fe_tier.py` | 3D FE tier implementation: damaged mesh build + K assembly for FPF (`_fe3d_cai_first_ply_failure`) for CAI/TAI; buckling channel (`fe3d_cai_buckling`) delegates to the Rayleigh-Ritz closed form in `semi_analytical.py` (#129). Component-wise damage scaling via Voigt mask. |
 | | `fe_mesh.py` | Damaged hexahedral mesh construction from `DamageState`. Carries two per-element factors: `damage_factors` (out-of-plane, reduced inside delamination footprints) and `in_plane_damage_factors` (reduced only inside the fiber-break core). |
 | `viz/` | `plots_2d.py` | Damage-map ellipse overlay (with impact location + fiber-break-core markers), knockdown curves, per-tier comparison charts (matplotlib). |
 | | `plots_3d.py` | 3D PyVista plots: delamination surface, buckling mode shape, stress contour. Standalone scripts only — VTK/Qt embedding is not used (see CHANGELOG). |
@@ -52,7 +52,7 @@ inner layers directly.
 | `sweep/` | `parametric_sweep.py` | `sweep_energies`, `sweep_layups`, `sweep_thicknesses` with `on_error` (`raise`/`skip`/`warn`) and optional `progress_callback` — CSV output, partial-result preserving. |
 | `gui/` | `main_window.py` | `BvidMainWindow` — seven input panels + six result tabs + File menu; runs `BvidAnalysis` via `AnalysisWorker` / `SweepWorker` / `TierComparisonWorker` to keep the Qt main thread responsive. |
 | | `panels/*.py` | Material, panel-geometry, input-mode, impact, damage-table, analysis-tier, and sweep input panels. |
-| | `tabs/*.py` | Summary (with input + runtime caveat notes), Damage Map, Knockdown Curve (with auto background sweep), Damage View (orthographic projections), Buckling Eigenvalues, Damage Severity (through-thickness OOP-stiffness-loss heatmap). |
+| | `tabs/*.py` | Summary (with input + runtime caveat notes), Damage Map, Knockdown Curve (with auto background sweep), Damage View (orthographic projections), Buckling (tier-specific indicator), Damage Severity (through-thickness OOP-stiffness-loss heatmap). |
 | | `workers.py` | `AnalysisWorker`, `SweepWorker`, `TierComparisonWorker` — QThread subclasses; daemon-thread heartbeats, deleteLater cleanup, runtime-note propagation. |
 | | `config_io.py` | `config_to_dict` / `config_from_dict` for the File-menu Save/Load Config feature. |
 | | `app.py` | `bvidfe-gui` entry point. |
@@ -123,20 +123,20 @@ from bvidfe.sweep.parametric_sweep import sweep_energies, sweep_layups, sweep_th
 ## Roadmap
 
 ### Shipped in v0.2.0-dev
-- **PyQt6 GUI** with seven input panels and six result tabs (Summary, Damage Map, Knockdown Curve, Damage View, Buckling Eigenvalues, Damage Severity).
-- **Buckling eigenvalue CAI** in the `fe3d` tier (`fe3d_cai_buckling`); FPF retained as a comparison fallback.
+- **PyQt6 GUI** with seven input panels and six result tabs (Summary, Damage Map, Knockdown Curve, Damage View, Buckling, Damage Severity).
+- **Rayleigh-Ritz closed-form buckling CAI** in the `fe3d` tier (`fe3d_cai_buckling`, delegated to `semi_analytical.panel_buckling_load` per #129); FPF on the damaged 3D mesh retained alongside as the other channel, with `min(buckling, FPF)` governing.
 - **PyInstaller** packaging for standalone macOS and Windows apps via the GitHub Actions release workflow.
 - **Component-wise fe3d damage scaling** (in-plane vs out-of-plane) replacing the prior uniform `DAMAGE_STIFFNESS_FACTOR`.
 - **Through-thickness strengths and 1-3 shear strength** (`Zt`, `Zc`, `S13`) on `OrthotropicMaterial` with transverse-isotropy fallback to `Yt` / `Yc` / `S12`.
 - **Hex8 Jacobian validation** raising `DegenerateElementError` on non-positive `det(J)`.
-- **Runtime notes** on `AnalysisResults` surfacing fe3d buckling fallbacks (no positive eigenvalue, eigsh failure, plausibility-gate trip).
+- **Runtime notes** on `AnalysisResults` surfacing the fe3d buckling-channel fallback when the Rayleigh-Ritz closed form returns a degenerate result (tagged `fe3d_buckling_fallback`).
 - **Tier-comparison worker** moving the menu's 16-analysis sweep off the Qt main thread.
 - **Robust CLI / GUI input validation**: `choices=` materials, positive-float numeric flags, existing-path C-scan, distinct dialogs for missing-field / invalid-value / malformed-JSON config loads, surfaced damage-table row skipping.
 - **Sweep `on_error` / `progress_callback`** preserving partial results on per-iteration failure.
 
 ### Planned (post-v0.2.0)
 - **True cohesive surfaces**: replace stiffness-reduction approximation with full bilinear traction-separation law in the `fe3d` tier (resolves the residual energy-insensitivity at small DPA).
-- **In-plane pre-stress BCs** for the linear-buckling path (currently uniaxial-uniform with minimal lateral restraint).
+- **Reinstated 3D buckling FE path** with proper load-introduction BCs and plate/shell elements (DKQ or MITC4) so the buckling channel can capture damage-zone heterogeneity beyond what the closed-form delegation (#129) can express.
 - **Validated datasets**: Soutis (1996), Caprino (1984), Sanchez-Saez (2005), NASA COCOMAT — digitized and integrated into `validation/`.
 - **Calibrated material constants**: `olsson_alpha`, `soutis_k_s`, `dent_beta`, and related parameters refined against specific material test data.
 - **fe3d in CI validation gate**: extend `validate_bvid_public.py` to run all three tiers with looser tolerances on fe3d.
