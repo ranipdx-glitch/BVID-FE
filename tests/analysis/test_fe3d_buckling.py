@@ -52,24 +52,24 @@ def test_bvid_analysis_fe3d_cai_uses_buckling_path(small_cfg):
     assert r.buckling_eigenvalues[0] > 0
 
 
-def test_fe3d_cai_buckling_eigensolver_failure_emits_note(small_cfg, monkeypatch):
-    """If linear_buckling raises, fe3d_cai_buckling falls back to pristine
-    AND emits a runtime note explaining the fallback. Without the note the
-    user sees knockdown=1.0 with no indication that the solver failed."""
+def test_fe3d_cai_buckling_degenerate_closed_form_emits_note(small_cfg, monkeypatch):
+    """If the Rayleigh-Ritz closed-form returns a degenerate (non-finite or
+    non-positive) value for both the full-panel and the worst-sublaminate
+    paths, fe3d_cai_buckling falls back to pristine AND emits a runtime
+    note. Without the note the user would see knockdown=1.0 with no
+    indication that the buckling channel was inactive."""
     from bvidfe.analysis import fe_tier as ft
     from bvidfe.core.laminate import Laminate as Lam
 
-    def _raise(*_args, **_kwargs):
-        raise RuntimeError("synthetic ARPACK failure")
-
-    monkeypatch.setattr(ft, "linear_buckling", _raise)
+    monkeypatch.setattr(ft, "panel_buckling_load", lambda *_a, **_kw: float("inf"))
+    monkeypatch.setattr(ft, "sublaminate_buckling_load", lambda *_a, **_kw: float("inf"))
     lam = Lam(MATERIAL_LIBRARY["IM7/8552"], small_cfg.layup_deg, small_cfg.ply_thickness_mm)
     sigma, lambda_crit, notes = fe3d_cai_buckling(
         small_cfg, DamageState([], 0.0), lam, sigma_pristine_MPa=500.0
     )
     assert sigma == 500.0  # fell back to pristine
     assert lambda_crit == 0.0
-    assert any("eigensolver" in n.lower() for n in notes), notes
+    assert any("rayleigh-ritz" in n.lower() or "degenerate" in n.lower() for n in notes), notes
 
 
 def test_bvid_analysis_fe3d_surfaces_buckling_fallback_note(small_cfg, monkeypatch):
@@ -79,9 +79,7 @@ def test_bvid_analysis_fe3d_surfaces_buckling_fallback_note(small_cfg, monkeypat
     real result."""
     from bvidfe.analysis import fe_tier as ft
 
-    def _raise(*_args, **_kwargs):
-        raise RuntimeError("synthetic ARPACK failure")
-
-    monkeypatch.setattr(ft, "linear_buckling", _raise)
+    monkeypatch.setattr(ft, "panel_buckling_load", lambda *_a, **_kw: float("inf"))
+    monkeypatch.setattr(ft, "sublaminate_buckling_load", lambda *_a, **_kw: float("inf"))
     r = BvidAnalysis(small_cfg).run()
-    assert any("eigensolver" in n.lower() for n in r.notes), r.notes
+    assert any("rayleigh-ritz" in n.lower() or "degenerate" in n.lower() for n in r.notes), r.notes

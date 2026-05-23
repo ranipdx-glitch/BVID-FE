@@ -226,8 +226,25 @@ def sublaminate_buckling_load(
         )
         aspect = _MAX_SUBLAMINATE_ASPECT
 
-    # Minimum over (m, n) in 1..5 for uniaxial compression N0_x:
-    # N_cr(m,n) = (pi^2 / a^2) * [D11*m^4 + 2*(D12+2*D66)*(m*aspect)^2*n^2 + D22*(aspect*n)^4] / m^2
+    return _rayleigh_ritz_N_cr(D11, D22, D12, D66, a, aspect, boundary)
+
+
+def _rayleigh_ritz_N_cr(
+    D11: float,
+    D22: float,
+    D12: float,
+    D66: float,
+    a: float,
+    aspect: float,
+    boundary: str,
+) -> float:
+    """Closed-form SSSS uniaxial-compression N_cr for an orthotropic rectangle.
+
+    Shared kernel for ``sublaminate_buckling_load`` (sublaminate over a
+    delamination) and ``panel_buckling_load`` (intact full-panel). Minimises
+    over (m, n) in 1..5 the Navier sine-basis result from Timoshenko & Gere
+    §9.2 / Reddy 4.4.4, then applies the boundary-dependent multiplier.
+    """
     pi2 = math.pi * math.pi
     best = float("inf")
     for m_mode in range(1, 6):
@@ -242,6 +259,33 @@ def sublaminate_buckling_load(
                 best = N_mn
     boundary_factor = _BOUNDARY_BUCKLING_FACTOR.get(boundary, 1.0)
     return best * boundary_factor
+
+
+def panel_buckling_load(
+    lam: Laminate,
+    Lx_mm: float,
+    Ly_mm: float,
+    boundary: str = "simply_supported",
+) -> float:
+    """Full-panel buckling force per unit width N_cr (N/mm) for the intact
+    laminate under uniaxial compression along x.
+
+    Same closed-form Rayleigh-Ritz formula as :func:`sublaminate_buckling_load`
+    but evaluated on the full panel rectangle (a = Lx_mm, b = Ly_mm) and the
+    full laminate's CLT D matrix. Used by the fe3d buckling channel after the
+    3D K_g eigensolve was retired (#129): the 3D solid mesh on a thin
+    laminate locks too aggressively to produce a trustworthy buckling
+    eigenvalue, but the closed-form is exact for SSSS orthotropic rectangles.
+
+    The load direction is fixed at +x (the compression axis); a/b > 1 simply
+    means the panel is longer along the load direction than wide, which the
+    (m, n) minimisation handles correctly via the m^4 vs (a/b)^4 trade-off.
+    """
+    if Lx_mm <= 0 or Ly_mm <= 0:
+        return float("inf")
+    _, _, D = lam.abd_matrices()
+    D11, D22, D12, D66 = D[0, 0], D[1, 1], D[0, 1], D[2, 2]
+    return _rayleigh_ritz_N_cr(D11, D22, D12, D66, Lx_mm, Lx_mm / Ly_mm, boundary)
 
 
 def find_critical_interface(damage: DamageState, lam: Laminate) -> Optional[int]:
